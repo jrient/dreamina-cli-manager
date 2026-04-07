@@ -25,6 +25,7 @@ class TaskResponse(BaseModel):
     id: str
     account_id: str
     status: str
+    submit_id: Optional[str] = None
     result_url: Optional[str] = None
     error_msg: Optional[str] = None
     prompt: Optional[str] = None

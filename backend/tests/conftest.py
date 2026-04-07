@@ -1,4 +1,11 @@
 # backend/tests/conftest.py
+import os
+# 在导入其他模块之前设置测试环境变量
+os.environ["ACCOUNTS_DIR"] = "/tmp/jm_auto_test/accounts"
+os.environ["CONFIG_BASE"] = "/tmp/jm_auto_test/configs"
+os.environ["DB_PATH"] = "/tmp/jm_auto_test/db/tasks.db"
+os.environ["UPLOAD_DIR"] = "/tmp/jm_auto_test/uploads"
+
 import pytest
 import pytest_asyncio
 import aiosqlite

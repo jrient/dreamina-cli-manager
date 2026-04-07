@@ -66,8 +66,8 @@ async def test_delete_task(client, tmp_path, monkeypatch):
     import database
     async with aiosqlite.connect(str(database.DB_PATH)) as db:
         await db.execute(
-            "INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?)",
-            ("task1", "alice", "success", "http://example.com/v.mp4", None, "p", "{}", now, now)
+            "INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?,?)",
+            ("task1", "alice", "success", "submit1", "http://example.com/v.mp4", None, "p", "{}", now, now)
         )
         await db.commit()
 
