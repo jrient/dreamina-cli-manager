@@ -1,16 +1,24 @@
 // frontend/src/router/index.js
 import { createRouter, createWebHistory } from 'vue-router'
-import SubmitTask from '../views/SubmitTask.vue'
-import TaskList from '../views/TaskList.vue'
+import HomePage from '../views/HomePage.vue'
 import AccountManager from '../views/AccountManager.vue'
 
 const routes = [
-  { path: '/', component: SubmitTask },
-  { path: '/tasks', component: TaskList },
-  { path: '/accounts', component: AccountManager },
+  {
+    path: '/',
+    name: 'home',
+    component: HomePage
+  },
+  {
+    path: '/accounts',
+    name: 'accounts',
+    component: AccountManager
+  }
 ]
 
-export default createRouter({
+const router = createRouter({
   history: createWebHistory(),
-  routes,
+  routes
 })
+
+export default router
