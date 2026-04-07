@@ -76,12 +76,34 @@ async def create_task(
     async def save(upload: UploadFile, dest_dir: Path) -> str:
         dest = dest_dir / upload.filename
         content = await upload.read()
+        # 写入文件
         dest.write_bytes(content)
+        # fsync 确保数据写入磁盘
+        import os
+        fd = os.open(str(dest), os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        # 验证文件存在
+        if not dest.exists():
+            raise RuntimeError(f"文件保存失败: {dest}")
+        import datetime
+        print(f"[DEBUG {datetime.datetime.utcnow().isoformat()}] 文件已保存: {dest}, 大小: {dest.stat().st_size} bytes, 存在: {dest.is_file()}")
         return str(dest)
 
+    print(f"[DEBUG] 开始保存文件...")
     image_paths = [await save(f, task_dir) for f in images]
+    print(f"[DEBUG] 文件保存完成, image_paths: {image_paths}")
     video_paths = [await save(f, task_dir) for f in videos]
     audio_paths = [await save(f, task_dir) for f in audios]
+
+    # 在调用 CLI 前再次验证文件
+    for p in image_paths:
+        path = Path(p)
+        if not path.exists():
+            raise RuntimeError(f"文件不存在: {p}")
+        print(f"[DEBUG] CLI调用前验证文件存在: {p}, 大小: {path.stat().st_size}")
 
     params = json.dumps({
         "duration": duration,
@@ -121,7 +143,7 @@ async def create_task(
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         await db.execute(
-            "INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO tasks (id, account_id, status, submit_id, result_url, error_msg, prompt, params, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (task_id, account_id, task_status, submit_id, None, None, prompt, params, now, now),
         )
         await db.commit()

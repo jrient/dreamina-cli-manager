@@ -7,13 +7,13 @@ CREATE TABLE IF NOT EXISTS tasks (
     id          TEXT PRIMARY KEY,
     account_id  TEXT NOT NULL,
     status      TEXT NOT NULL DEFAULT 'pending',
-    submit_id   TEXT,
     result_url  TEXT,
     error_msg   TEXT,
     prompt      TEXT,
     params      TEXT,
     created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
+    updated_at  TEXT NOT NULL,
+    submit_id   TEXT
 );
 """
 
