@@ -64,9 +64,9 @@
       </div>
 
       <div v-if="task.status === 'success' && task.result_url" class="task-result">
-        <el-link :href="task.result_url" target="_blank" type="primary">
-          <el-icon><VideoPlay /></el-icon> 下载/查看视频
-        </el-link>
+        <el-button type="success" :href="task.result_url" target="_blank">
+          <el-icon><Download /></el-icon> 下载视频
+        </el-button>
       </div>
 
       <div v-if="task.status === 'failed'" class="task-error">
@@ -91,7 +91,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Delete, VideoPlay } from '@element-plus/icons-vue'
+import { Refresh, Delete, Download } from '@element-plus/icons-vue'
 import { api } from '../api/index.js'
 
 const tasks = ref([])
