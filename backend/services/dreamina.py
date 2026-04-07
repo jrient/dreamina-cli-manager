@@ -70,7 +70,7 @@ async def run_cli(args: list[str], account_id: str, stdin: Optional[str] = None)
     """Run dreamina CLI with account isolation. Returns (returncode, stdout, stderr)."""
     env = get_account_env(account_id)
     proc = await asyncio.create_subprocess_exec(
-        "dreamina", *args,
+        "/root/.local/bin/dreamina", *args,
         stdin=asyncio.subprocess.PIPE if stdin else None,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -133,7 +133,7 @@ async def submit_multimodal2video(
         args += ["--ratio", ratio]
     if model_version:
         args += ["--model_version", model_version]
-    args += ["--poll", "1"]  # 等待初始状态返回
+    args += ["--poll", "5"]  # 等待5秒获取初始状态反馈
 
     returncode, stdout, stderr = await run_cli(args, account_id=account_id)
     combined = stdout + "\n" + stderr

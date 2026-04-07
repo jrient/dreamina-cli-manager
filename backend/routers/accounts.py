@@ -153,7 +153,7 @@ async def start_login(account_id: str):
     # Use shell with timeout to run dreamina login --debug
     # This captures output before the process is killed
     proc = await asyncio.create_subprocess_shell(
-        "timeout 3 dreamina login --debug 2>&1 || cat /dev/stdin",
+        "timeout 3 /root/.local/bin/dreamina login --debug 2>&1 || cat /dev/stdin",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         env=env,
@@ -220,7 +220,7 @@ async def import_account_credentials(account_id: str, req: ImportCredentialsRequ
 
         # Run dreamina import_login_response --file
         proc = await asyncio.create_subprocess_exec(
-            "dreamina", "import_login_response", "--file", str(temp_path),
+            "/root/.local/bin/dreamina", "import_login_response", "--file", str(temp_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
