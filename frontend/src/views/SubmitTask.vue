@@ -36,12 +36,53 @@
 
       <!-- 提示词输入框 -->
       <el-form-item label="提示词">
-        <el-input
-          v-model="form.prompt"
-          type="textarea"
-          :rows="3"
-          placeholder="可选：描述生成内容（输入 @ 引用已上传文件）"
-        />
+        <div class="prompt-container">
+          <el-input
+            ref="promptInput"
+            v-model="form.prompt"
+            type="textarea"
+            :rows="3"
+            placeholder="可选：描述生成内容（输入 @ 引用已上传文件）"
+            @input="handlePromptInput"
+            @keydown.esc="showMentionPopup = false"
+          />
+          <!-- @ 浮层 -->
+          <div v-if="showMentionPopup" class="mention-popup">
+            <div v-if="form.images.length" class="mention-group">
+              <div class="group-title">图片</div>
+              <div
+                v-for="(img, i) in form.images"
+                :key="i"
+                class="mention-item"
+                @click="insertMention('图片', i + 1)"
+              >
+                🖼️ 图片{{ i + 1 }} <span class="filename">{{ img.name }}</span>
+              </div>
+            </div>
+            <div v-if="form.audios.length" class="mention-group">
+              <div class="group-title">音频</div>
+              <div
+                v-for="(aud, i) in form.audios"
+                :key="i"
+                class="mention-item"
+                @click="insertMention('音频', i + 1)"
+              >
+                🎵 音频{{ i + 1 }} <span class="filename">{{ aud.name }}</span>
+              </div>
+            </div>
+            <div v-if="form.videos.length" class="mention-group">
+              <div class="group-title">视频</div>
+              <div
+                v-for="(vid, i) in form.videos"
+                :key="i"
+                class="mention-item"
+                @click="insertMention('视频', i + 1)"
+              >
+                🎬 视频{{ i + 1 }} <span class="filename">{{ vid.name }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </el-form-item>
 
       <!-- 参数行：横向排列 -->
@@ -100,6 +141,8 @@ const submitting = ref(false)
 const imageInput = ref(null)
 const audioInput = ref(null)
 const videoInput = ref(null)
+const promptInput = ref(null)
+const showMentionPopup = ref(false)
 
 function triggerUpload(type) {
   if (type === 'image') imageInput.value.click()
@@ -118,6 +161,26 @@ function handleUpload(type, event) {
 
 function removeFile(type, index) {
   form.value[type].splice(index, 1)
+}
+
+function handlePromptInput(value) {
+  // 检测最后输入字符是否为 @
+  const lastChar = value.slice(-1)
+  if (lastChar === '@') {
+    // 只在有已上传文件时弹出
+    if (form.value.images.length || form.value.audios.length || form.value.videos.length) {
+      showMentionPopup.value = true
+    }
+  } else {
+    showMentionPopup.value = false
+  }
+}
+
+function insertMention(type, index) {
+  const mention = `@${type}${index}`
+  // 替换最后的 @ 为 mention
+  form.value.prompt = form.value.prompt.slice(0, -1) + mention + ' '
+  showMentionPopup.value = false
 }
 
 async function submit() {
@@ -201,5 +264,57 @@ async function submit() {
 .params-row .el-form-item {
   flex: 1;
   min-width: 120px;
+}
+
+.prompt-container {
+  position: relative;
+}
+
+.mention-popup {
+  position: absolute;
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  padding: 6px;
+  z-index: 10;
+  max-height: 200px;
+  overflow-y: auto;
+  width: 200px;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+}
+
+.mention-group {
+  margin-bottom: 4px;
+}
+
+.group-title {
+  color: #909399;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+}
+
+.mention-item {
+  padding: 4px 6px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mention-item:hover {
+  background: #ecf5ff;
+}
+
+.filename {
+  color: #909399;
+  font-size: 10px;
 }
 </style>
