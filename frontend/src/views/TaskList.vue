@@ -105,6 +105,7 @@ const activeAccount = ref('')
 
 const statusOptions = [
   { label: '全部', value: '' },
+  { label: '排队中', value: 'queued' },
   { label: '等待中', value: 'pending' },
   { label: '生成中', value: 'processing' },
   { label: '已完成', value: 'success' },
@@ -160,11 +161,11 @@ async function deleteTask(id) {
 }
 
 function statusType(s) {
-  return { pending: 'info', processing: 'warning', success: 'success', failed: 'danger' }[s] || 'info'
+  return { queued: 'info', pending: 'info', processing: 'warning', success: 'success', failed: 'danger' }[s] || 'info'
 }
 
 function statusLabel(s) {
-  return { pending: '等待中', processing: '生成中', success: '已完成', failed: '失败' }[s] || s
+  return { queued: '排队中', pending: '等待中', processing: '生成中', success: '已完成', failed: '失败' }[s] || s
 }
 
 function formatDate(iso) {
@@ -219,6 +220,7 @@ function formatParams(paramsStr) {
 .task-card[data-status="processing"] { border-left-color: #e6a23c; }
 .task-card[data-status="failed"] { border-left-color: #f56c6c; }
 .task-card[data-status="pending"] { border-left-color: #909399; }
+.task-card[data-status="queued"] { border-left-color: #c0c4cc; }
 
 .task-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .task-meta { flex: 1; color: #909399; font-size: 13px; }
