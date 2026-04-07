@@ -10,6 +10,11 @@ from typing import Optional
 # Dreamina 账号配置目录（每个账号独立的 HOME）
 ACCOUNT_HOME_BASE = Path("/root/.dreamina_accounts")
 
+
+class ConcurrencyLimitError(Exception):
+    """即梦并发限制，任务需排队等待"""
+    pass
+
 # Regex patterns for parsing dreamina CLI output
 SUBMIT_ID_RE = re.compile(r'(?:submit[_\s]id|task[_\s]id)[:\s]+([a-f0-9]{8,})', re.I)
 RESULT_URL_RE = re.compile(r'https?://\S+\.(?:mp4|mov|webm)\S*', re.I)
@@ -140,6 +145,9 @@ async def submit_multimodal2video(
             gen_status = data.get("gen_status", "")
             if gen_status == "fail":
                 fail_reason = data.get("fail_reason", "Unknown error")
+                # 检查是否为并发限制错误
+                if "ExceedConcurrencyLimit" in fail_reason or "ret=1310" in fail_reason:
+                    raise ConcurrencyLimitError(fail_reason)
                 raise RuntimeError(f"任务提交失败: {fail_reason}")
             # Return submit_id from poll result
             submit_id = data.get("submit_id")
@@ -178,6 +186,13 @@ async def query_result(account_id: str, submit_id: str) -> dict:
             raw_status = data.get("gen_status") or data.get("status") or "processing"
             result_url = data.get("result_url") or data.get("url") or data.get("video_url")
             error_msg = data.get("error") or data.get("message")
+
+            # Check nested result_json.videos[0].video_url
+            if not result_url:
+                result_json = data.get("result_json") or {}
+                videos = result_json.get("videos") or []
+                if videos and isinstance(videos, list):
+                    result_url = videos[0].get("video_url")
 
             # Normalize status
             if raw_status in ("success", "succeeded", "completed", "done"):
