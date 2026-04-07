@@ -1,9 +1,39 @@
 <!-- frontend/src/views/TaskList.vue -->
 <template>
   <div class="task-list">
+    <!-- 筛选器头部 -->
     <div class="list-header">
-      <el-text size="large">任务列表</el-text>
-      <el-button :loading="loading" @click="fetchTasks">刷新</el-button>
+      <div class="header-title">
+        <el-text size="large">任务列表</el-text>
+        <el-text size="small" type="info">（共 {{ tasks.length }} 条）</el-text>
+      </div>
+      <div class="header-actions">
+        <!-- 状态筛选：Tag 按钮组 -->
+        <el-tag
+          v-for="s in statusOptions"
+          :key="s.value"
+          :type="activeStatus === s.value ? 'primary' : 'info'"
+          :effect="activeStatus === s.value ? 'dark' : 'plain'"
+          class="filter-tag"
+          @click="activeStatus = s.value"
+        >
+          {{ s.label }}
+        </el-tag>
+        <!-- 账号筛选：下拉框 -->
+        <el-select
+          v-model="activeAccount"
+          placeholder="账号筛选"
+          size="small"
+          style="width: 120px; margin-left: 10px"
+          clearable
+        >
+          <el-option label="全部账号" value="" />
+          <el-option v-for="acc in accounts" :key="acc.id" :label="acc.id" :value="acc.id" />
+        </el-select>
+        <el-button :loading="loading" circle size="small" @click="fetchTasks">
+          <el-icon><Refresh /></el-icon>
+        </el-button>
+      </div>
     </div>
 
     <el-empty v-if="!tasks.length && !loading" description="暂无任务" />
@@ -12,6 +42,7 @@
       v-for="task in tasks"
       :key="task.id"
       class="task-card"
+      :data-status="task.status"
       shadow="hover"
     >
       <div class="task-header">
@@ -58,16 +89,31 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Refresh, Delete, VideoPlay } from '@element-plus/icons-vue'
 import { api } from '../api/index.js'
 
 const tasks = ref([])
 const loading = ref(false)
+const accounts = ref([])
 let refreshTimer = null
 
-onMounted(() => {
-  fetchTasks()
+// 筛选状态
+const activeStatus = ref('')
+const activeAccount = ref('')
+
+const statusOptions = [
+  { label: '全部', value: '' },
+  { label: '等待中', value: 'pending' },
+  { label: '生成中', value: 'processing' },
+  { label: '已完成', value: 'success' },
+  { label: '失败', value: 'failed' },
+]
+
+onMounted(async () => {
+  await fetchTasks()
+  await fetchAccounts()
   refreshTimer = setInterval(fetchTasks, 10000)
 })
 
@@ -75,10 +121,26 @@ onUnmounted(() => {
   clearInterval(refreshTimer)
 })
 
+// 监听筛选条件变化
+watch([activeStatus, activeAccount], () => {
+  fetchTasks()
+})
+
+async function fetchAccounts() {
+  try {
+    accounts.value = await api.listAccounts()
+  } catch (e) {
+    // 静默失败
+  }
+}
+
 async function fetchTasks() {
   loading.value = true
   try {
-    tasks.value = await api.listTasks()
+    tasks.value = await api.listTasks({
+      status: activeStatus.value || undefined,
+      account_id: activeAccount.value || undefined,
+    })
   } catch (e) {
     ElMessage.error('加载任务失败: ' + e.message)
   } finally {
@@ -121,8 +183,43 @@ function formatParams(paramsStr) {
 
 <style scoped>
 .task-list { max-width: 860px; margin: 24px auto; }
-.list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-.task-card { margin-bottom: 12px; }
+
+.list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.header-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.filter-tag {
+  cursor: pointer;
+  margin-right: 4px;
+}
+
+.task-card {
+  margin-bottom: 12px;
+  border-left: 3px solid;
+}
+
+.task-card[data-status="success"] { border-left-color: #67c23a; }
+.task-card[data-status="processing"] { border-left-color: #e6a23c; }
+.task-card[data-status="failed"] { border-left-color: #f56c6c; }
+.task-card[data-status="pending"] { border-left-color: #909399; }
+
 .task-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .task-meta { flex: 1; color: #909399; font-size: 13px; }
 .task-params { margin-bottom: 4px; }
