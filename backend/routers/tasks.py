@@ -1,6 +1,7 @@
 # backend/routers/tasks.py
 import json
 import shutil
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -11,7 +12,7 @@ from fastapi.responses import Response
 
 from config import ACCOUNTS_DIR, UPLOAD_DIR, DB_PATH
 from models import TaskResponse
-from services.dreamina import submit_multimodal2video, ACCOUNT_HOME_BASE, is_account_logged_in
+from services.dreamina import submit_multimodal2video, ConcurrencyLimitError, ACCOUNT_HOME_BASE, is_account_logged_in
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -25,6 +26,7 @@ def _row_to_task(row) -> TaskResponse:
         id=row["id"],
         account_id=row["account_id"],
         status=row["status"],
+        submit_id=row["submit_id"],
         result_url=row["result_url"],
         error_msg=row["error_msg"],
         prompt=row["prompt"],
@@ -64,9 +66,12 @@ async def create_task(
             raise HTTPException(404, f"账号 '{account_id}' 不存在")
         raise HTTPException(400, f"账号 '{account_id}' 未登录，请先在账号管理页面登录")
 
-    # Save uploaded files to temp directory (named after a placeholder; rename after submit)
-    tmp_dir = UPLOAD_DIR / "_tmp_new"
-    tmp_dir.mkdir(parents=True, exist_ok=True)
+    # Generate UUID for task
+    task_id = uuid.uuid4().hex[:12]
+
+    # Save uploaded files to task-specific directory
+    task_dir = UPLOAD_DIR / task_id
+    task_dir.mkdir(parents=True, exist_ok=True)
 
     async def save(upload: UploadFile, dest_dir: Path) -> str:
         dest = dest_dir / upload.filename
@@ -74,9 +79,23 @@ async def create_task(
         dest.write_bytes(content)
         return str(dest)
 
-    image_paths = [await save(f, tmp_dir) for f in images]
-    video_paths = [await save(f, tmp_dir) for f in videos]
-    audio_paths = [await save(f, tmp_dir) for f in audios]
+    image_paths = [await save(f, task_dir) for f in images]
+    video_paths = [await save(f, task_dir) for f in videos]
+    audio_paths = [await save(f, task_dir) for f in audios]
+
+    params = json.dumps({
+        "duration": duration,
+        "ratio": ratio,
+        "model_version": model_version,
+        "image_paths": image_paths,
+        "video_paths": video_paths,
+        "audio_paths": audio_paths,
+    })
+    now = _now()
+
+    # Try to submit, handle concurrency limit
+    submit_id = None
+    task_status = "queued"
 
     try:
         submit_id = await submit_multimodal2video(
@@ -89,25 +108,24 @@ async def create_task(
             ratio=ratio,
             model_version=model_version,
         )
+        task_status = "pending"
+    except ConcurrencyLimitError:
+        # Task queued, will be submitted later
+        pass
     except Exception as e:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        # Real error, clean up and fail
+        shutil.rmtree(task_dir, ignore_errors=True)
         raise HTTPException(status_code=502, detail=str(e))
 
-    # Rename temp dir to submit_id
-    final_dir = UPLOAD_DIR / submit_id
-    shutil.move(str(tmp_dir), str(final_dir))
-
-    params = json.dumps({"duration": duration, "ratio": ratio, "model_version": model_version})
-    now = _now()
-
+    # Insert task to database
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         await db.execute(
-            "INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?)",
-            (submit_id, account_id, "pending", None, None, prompt, params, now, now),
+            "INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (task_id, account_id, task_status, submit_id, None, None, prompt, params, now, now),
         )
         await db.commit()
-        cursor = await db.execute("SELECT * FROM tasks WHERE id=?", (submit_id,))
+        cursor = await db.execute("SELECT * FROM tasks WHERE id=?", (task_id,))
         row = await cursor.fetchone()
 
     return _row_to_task(row)
