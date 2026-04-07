@@ -55,3 +55,7 @@ logs/
 tmp/
 temp/
 *.tmp
+
+# Credentials
+accounts/*.json
+!accounts/.gitkeep
