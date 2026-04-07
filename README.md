@@ -79,6 +79,12 @@ open http://localhost:8090
 └── docker-compose.yml
 ```
 
+## TODO
+
+- [ ] 解决服务器上传带宽不足导致大文件上传超时问题
+  - 当前上传带宽约 60-160 KB/s，大文件（>1MB）可能超时
+  - 可能方案：前端添加文件大小检查、优化服务器带宽、尝试直连 CDN 节点
+
 ## License
 
 MIT
