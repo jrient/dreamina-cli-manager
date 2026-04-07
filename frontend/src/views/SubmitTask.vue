@@ -36,7 +36,7 @@
 
       <!-- 提示词输入框 -->
       <el-form-item label="提示词">
-        <div class="prompt-container">
+        <div class="prompt-container" ref="promptContainer">
           <el-input
             ref="promptInput"
             v-model="form.prompt"
@@ -114,6 +114,7 @@
 
 <script setup>
 import { ref, inject } from 'vue'
+import { onClickOutside } from '@vueuse/core'
 import { ElMessage } from 'element-plus'
 import { api } from '../api/index.js'
 
@@ -142,7 +143,12 @@ const imageInput = ref(null)
 const audioInput = ref(null)
 const videoInput = ref(null)
 const promptInput = ref(null)
+const promptContainer = ref(null)
 const showMentionPopup = ref(false)
+
+onClickOutside(promptContainer, () => {
+  showMentionPopup.value = false
+})
 
 function triggerUpload(type) {
   if (type === 'image') imageInput.value.click()
