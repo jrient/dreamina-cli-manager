@@ -28,7 +28,8 @@
       <div class="file-preview" v-if="hasFiles">
         <div v-for="(img, i) in form.images" :key="'img-'+i" class="preview-item">
           <div class="preview-thumb preview-thumb-image">
-            <span class="thumb-icon">🖼️</span>
+            <img v-if="img.preview" :src="img.preview" class="thumb-img" />
+            <span v-else class="thumb-icon">🖼️</span>
           </div>
           <div class="preview-name">{{ img.name }}</div>
           <div class="preview-remove" @click="removeFile('images', i)">✕</div>
@@ -79,7 +80,11 @@
               class="mention-item"
               @click="insertMention('图片', i + 1)"
             >
-              🖼️ 图片{{ i + 1 }} <span class="filename">{{ img.name }}</span>
+              <div class="mention-thumb">
+                <img v-if="img.preview" :src="img.preview" class="mention-thumb-img" />
+                <span v-else>🖼️</span>
+              </div>
+              <span>图片{{ i + 1 }} <span class="filename">{{ img.name }}</span></span>
             </div>
           </div>
           <div v-if="form.audios.length" class="mention-group">
@@ -90,7 +95,7 @@
               class="mention-item"
               @click="insertMention('音频', i + 1)"
             >
-              🎵 音频{{ i + 1 }} <span class="filename">{{ aud.name }}</span>
+              <span>🎵 音频{{ i + 1 }} <span class="filename">{{ aud.name }}</span></span>
             </div>
           </div>
           <div v-if="form.videos.length" class="mention-group">
@@ -101,7 +106,7 @@
               class="mention-item"
               @click="insertMention('视频', i + 1)"
             >
-              🎬 视频{{ i + 1 }} <span class="filename">{{ vid.name }}</span>
+              <span>🎬 视频{{ i + 1 }} <span class="filename">{{ vid.name }}</span></span>
             </div>
           </div>
         </div>
@@ -212,12 +217,22 @@ function handleUpload(type, event) {
   const files = Array.from(event.target.files)
   const current = form.value[type]
   files.forEach(file => {
-    current.push({ name: file.name, raw: file })
+    const item = { name: file.name, raw: file }
+    // 为图片生成预览 URL
+    if (type === 'images' && file.type.startsWith('image/')) {
+      item.preview = URL.createObjectURL(file)
+    }
+    current.push(item)
   })
   event.target.value = ''
 }
 
 function removeFile(type, index) {
+  const item = form.value[type][index]
+  // 清理预览 URL
+  if (item.preview) {
+    URL.revokeObjectURL(item.preview)
+  }
   form.value[type].splice(index, 1)
 }
 
@@ -373,6 +388,13 @@ async function submit() {
   font-size: 12px;
 }
 
+.thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
 .preview-name {
   font-size: 11px;
   color: #606266;
@@ -458,6 +480,23 @@ async function submit() {
   align-items: center;
   gap: 6px;
   transition: background 0.15s;
+}
+
+.mention-thumb {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f0f0f0;
+  overflow: hidden;
+}
+
+.mention-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .mention-item:hover {

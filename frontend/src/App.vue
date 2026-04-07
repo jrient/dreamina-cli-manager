@@ -13,7 +13,7 @@
       </div>
     </el-header>
     <el-main class="app-main">
-      <HomePage />
+      <router-view />
     </el-main>
   </el-container>
 </template>
@@ -21,7 +21,6 @@
 <script setup>
 import { ref, provide } from 'vue'
 import AccountSelector from './components/AccountSelector.vue'
-import HomePage from './views/HomePage.vue'
 
 const selectedAccountId = ref('')
 provide('selectedAccountId', selectedAccountId)
