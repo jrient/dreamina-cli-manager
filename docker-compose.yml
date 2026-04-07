@@ -3,6 +3,9 @@ networks:
   dreamina-net:
     driver: bridge
 
+volumes:
+  dreamina-accounts:
+
 services:
   backend:
     build: ./backend
@@ -11,13 +14,16 @@ services:
       - ACCOUNTS_DIR=/app/accounts
       - CONFIG_BASE=/app/configs
       - DB_PATH=/app/db/tasks.db
-      - UPLOAD_DIR=/app/uploads
+      - UPLOAD_DIR=/tmp/uploads
+      - RESULTS_DIR=/app/results
       - POLL_INTERVAL=10
     volumes:
       - ./accounts:/app/accounts:ro
       - ./db:/app/db
       - ./uploads:/app/uploads
+      - ./results:/app/results
       - ./backend:/app                # 代码挂载，方便实时更新
+      - dreamina-accounts:/root/.dreamina_accounts  # 账号登录凭证持久化
     networks:
       - dreamina-net
     restart: unless-stopped
