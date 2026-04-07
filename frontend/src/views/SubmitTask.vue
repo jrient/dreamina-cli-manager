@@ -1,119 +1,166 @@
 <!-- frontend/src/views/SubmitTask.vue -->
 <template>
   <div class="submit-panel">
-    <div class="panel-title">
-      <el-tag type="primary" effect="dark" size="small">NEW</el-tag>
-      <span>提交任务</span>
-    </div>
+    <div class="panel-title">✨ 创建新任务</div>
 
-    <el-form :model="form" label-width="70px" label-position="top" @submit.prevent="submit">
-      <!-- 媒体上传区：合并为一个上传按钮组 -->
-      <el-form-item label="">
-        <div class="upload-area">
-          <div class="upload-hint">拖拽或点击上传媒体文件</div>
-          <div class="upload-buttons">
-            <el-button plain @click="triggerUpload('image')">🖼️ 图片</el-button>
-            <el-button plain @click="triggerUpload('audio')">🎵 音频</el-button>
-            <el-button plain @click="triggerUpload('video')">🎬 视频</el-button>
-          </div>
-          <div class="upload-preview">
-            <el-tag v-for="(img, i) in form.images" :key="i" closable @close="removeFile('images', i)">
-              🖼️ 图片{{ i + 1 }}: {{ img.name }}
-            </el-tag>
-            <el-tag v-for="(aud, i) in form.audios" :key="i" closable @close="removeFile('audios', i)">
-              🎵 音频{{ i + 1 }}: {{ aud.name }}
-            </el-tag>
-            <el-tag v-for="(vid, i) in form.videos" :key="i" closable @close="removeFile('videos', i)">
-              🎬 视频{{ i + 1 }}: {{ vid.name }}
-            </el-tag>
-          </div>
+    <el-form :model="form" label-position="top" @submit.prevent="submit">
+      <!-- 媒体上传区：卡片化设计 -->
+      <div class="section-label">媒体文件</div>
+      <div class="upload-grid">
+        <div class="upload-card" @click="triggerUpload('image')" @mouseenter="hoverCard = 'image'" @mouseleave="hoverCard = ''">
+          <div class="upload-icon">🖼️</div>
+          <div class="upload-label">添加图片</div>
+          <div class="upload-limit">最多9张</div>
         </div>
-        <!-- 隐藏的 file input -->
-        <input ref="imageInput" type="file" accept="image/*" multiple hidden @change="handleUpload('images', $event)">
-        <input ref="audioInput" type="file" accept="audio/*" multiple hidden @change="handleUpload('audios', $event)">
-        <input ref="videoInput" type="file" accept="video/*" multiple hidden @change="handleUpload('videos', $event)">
-      </el-form-item>
-
-      <!-- 提示词输入框 -->
-      <el-form-item label="提示词">
-        <div class="prompt-container" ref="promptContainer">
-          <el-input
-            ref="promptInput"
-            v-model="form.prompt"
-            type="textarea"
-            :rows="3"
-            placeholder="可选：描述生成内容（输入 @ 引用已上传文件）"
-            @input="handlePromptInput"
-            @keydown.esc="showMentionPopup = false"
-          />
-          <!-- @ 浮层 -->
-          <div v-if="showMentionPopup" class="mention-popup">
-            <div v-if="form.images.length" class="mention-group">
-              <div class="group-title">图片</div>
-              <div
-                v-for="(img, i) in form.images"
-                :key="i"
-                class="mention-item"
-                @click="insertMention('图片', i + 1)"
-              >
-                🖼️ 图片{{ i + 1 }} <span class="filename">{{ img.name }}</span>
-              </div>
-            </div>
-            <div v-if="form.audios.length" class="mention-group">
-              <div class="group-title">音频</div>
-              <div
-                v-for="(aud, i) in form.audios"
-                :key="i"
-                class="mention-item"
-                @click="insertMention('音频', i + 1)"
-              >
-                🎵 音频{{ i + 1 }} <span class="filename">{{ aud.name }}</span>
-              </div>
-            </div>
-            <div v-if="form.videos.length" class="mention-group">
-              <div class="group-title">视频</div>
-              <div
-                v-for="(vid, i) in form.videos"
-                :key="i"
-                class="mention-item"
-                @click="insertMention('视频', i + 1)"
-              >
-                🎬 视频{{ i + 1 }} <span class="filename">{{ vid.name }}</span>
-              </div>
-            </div>
-          </div>
+        <div class="upload-card" @click="triggerUpload('audio')" @mouseenter="hoverCard = 'audio'" @mouseleave="hoverCard = ''">
+          <div class="upload-icon">🎵</div>
+          <div class="upload-label">添加音频</div>
+          <div class="upload-limit">最多3个</div>
         </div>
-      </el-form-item>
-
-      <!-- 参数行：横向排列 -->
-      <div class="params-row">
-        <el-form-item label="时长">
-          <el-slider v-model="form.duration" :min="4" :max="15" :step="1" show-input />
-        </el-form-item>
-        <el-form-item label="比例">
-          <el-radio-group v-model="form.ratio">
-            <el-radio-button v-for="r in ratios" :key="r" :label="r">{{ r }}</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item label="模型">
-          <el-select v-model="form.model_version">
-            <el-option v-for="m in models" :key="m.value" :label="m.label" :value="m.value" />
-          </el-select>
-        </el-form-item>
+        <div class="upload-card" @click="triggerUpload('video')" @mouseenter="hoverCard = 'video'" @mouseleave="hoverCard = ''">
+          <div class="upload-icon">🎬</div>
+          <div class="upload-label">添加视频</div>
+          <div class="upload-limit">最多3个</div>
+        </div>
       </div>
 
-      <el-form-item>
-        <el-button type="primary" native-type="submit" :loading="submitting" :disabled="!accountId">
-          ▶ 提交任务
-        </el-button>
-        <el-text v-if="!accountId" type="warning" style="margin-left: 12px">请先选择账号</el-text>
-      </el-form-item>
+      <!-- 已上传文件预览 -->
+      <div class="file-preview" v-if="hasFiles">
+        <div v-for="(img, i) in form.images" :key="'img-'+i" class="preview-item">
+          <div class="preview-thumb preview-thumb-image">
+            <span class="thumb-icon">🖼️</span>
+          </div>
+          <div class="preview-name">{{ img.name }}</div>
+          <div class="preview-remove" @click="removeFile('images', i)">✕</div>
+        </div>
+        <div v-for="(aud, i) in form.audios" :key="'aud-'+i" class="preview-item">
+          <div class="preview-thumb preview-thumb-audio">
+            <span class="thumb-icon">🎵</span>
+          </div>
+          <div class="preview-name">{{ aud.name }}</div>
+          <div class="preview-remove" @click="removeFile('audios', i)">✕</div>
+        </div>
+        <div v-for="(vid, i) in form.videos" :key="'vid-'+i" class="preview-item">
+          <div class="preview-thumb preview-thumb-video">
+            <span class="thumb-icon">🎬</span>
+          </div>
+          <div class="preview-name">{{ vid.name }}</div>
+          <div class="preview-remove" @click="removeFile('videos', i)">✕</div>
+        </div>
+      </div>
+
+      <!-- 隐藏的 file input -->
+      <input ref="imageInput" type="file" accept="image/*" multiple hidden @change="handleUpload('images', $event)">
+      <input ref="audioInput" type="file" accept="audio/*" multiple hidden @change="handleUpload('audios', $event)">
+      <input ref="videoInput" type="file" accept="video/*" multiple hidden @change="handleUpload('videos', $event)">
+
+      <!-- 提示词输入框 -->
+      <div class="section-label">
+        提示词
+        <span class="section-hint">（可选，输入@引用媒体）</span>
+      </div>
+      <div class="prompt-container" ref="promptContainer">
+        <el-input
+          ref="promptInput"
+          v-model="form.prompt"
+          type="textarea"
+          :rows="3"
+          placeholder="描述你想要生成的视频内容..."
+          @input="handlePromptInput"
+          @keydown.esc="showMentionPopup = false"
+        />
+        <!-- @ 浮层 -->
+        <div v-if="showMentionPopup" class="mention-popup">
+          <div v-if="form.images.length" class="mention-group">
+            <div class="group-title">图片</div>
+            <div
+              v-for="(img, i) in form.images"
+              :key="i"
+              class="mention-item"
+              @click="insertMention('图片', i + 1)"
+            >
+              🖼️ 图片{{ i + 1 }} <span class="filename">{{ img.name }}</span>
+            </div>
+          </div>
+          <div v-if="form.audios.length" class="mention-group">
+            <div class="group-title">音频</div>
+            <div
+              v-for="(aud, i) in form.audios"
+              :key="i"
+              class="mention-item"
+              @click="insertMention('音频', i + 1)"
+            >
+              🎵 音频{{ i + 1 }} <span class="filename">{{ aud.name }}</span>
+            </div>
+          </div>
+          <div v-if="form.videos.length" class="mention-group">
+            <div class="group-title">视频</div>
+            <div
+              v-for="(vid, i) in form.videos"
+              :key="i"
+              class="mention-item"
+              @click="insertMention('视频', i + 1)"
+            >
+              🎬 视频{{ i + 1 }} <span class="filename">{{ vid.name }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 生成参数区 -->
+      <div class="params-section">
+        <div class="section-label">生成参数</div>
+
+        <!-- 时长滑块 -->
+        <div class="param-row">
+          <div class="param-header">
+            <span class="param-label">视频时长</span>
+            <span class="param-value">{{ form.duration }} 秒</span>
+          </div>
+          <el-slider v-model="form.duration" :min="4" :max="15" :step="1" :show-tooltip="false" />
+        </div>
+
+        <!-- 比例选择 -->
+        <div class="param-row">
+          <span class="param-label">画面比例</span>
+          <div class="ratio-chips">
+            <span
+              v-for="r in ratios"
+              :key="r"
+              :class="['ratio-chip', { active: form.ratio === r }]"
+              @click="form.ratio = r"
+            >{{ r }}</span>
+          </div>
+        </div>
+
+        <!-- 模型选择 -->
+        <div class="param-row">
+          <span class="param-label">模型版本</span>
+          <el-select v-model="form.model_version" class="model-select">
+            <el-option v-for="m in models" :key="m.value" :label="m.label" :value="m.value">
+              <span>{{ m.icon }} {{ m.label }}</span>
+            </el-option>
+          </el-select>
+        </div>
+      </div>
+
+      <!-- 提交按钮 -->
+      <el-button
+        type="primary"
+        native-type="submit"
+        :loading="submitting"
+        :disabled="!accountId"
+        class="submit-btn"
+      >
+        ✨ 开始生成
+      </el-button>
+      <div v-if="!accountId" class="submit-hint">请先在顶部选择账号</div>
     </el-form>
   </div>
 </template>
 
 <script setup>
-import { ref, inject } from 'vue'
+import { ref, inject, computed } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { ElMessage } from 'element-plus'
 import { api } from '../api/index.js'
@@ -122,10 +169,10 @@ const accountId = inject('selectedAccountId')
 
 const ratios = ['1:1', '16:9', '9:16', '4:3', '3:4', '21:9']
 const models = [
-  { label: 'Seedance 2.0 Fast', value: 'seedance2.0fast' },
-  { label: 'Seedance 2.0', value: 'seedance2.0' },
-  { label: 'Seedance 2.0 VIP', value: 'seedance2.0_vip' },
-  { label: 'Seedance 2.0 Fast VIP', value: 'seedance2.0fast_vip' },
+  { label: 'Fast（推荐）', value: 'seedance2.0fast', icon: '🚀' },
+  { label: '标准版', value: 'seedance2.0', icon: '⭐' },
+  { label: 'VIP', value: 'seedance2.0_vip', icon: '👑' },
+  { label: 'Fast VIP', value: 'seedance2.0fast_vip', icon: '💎' },
 ]
 
 const form = ref({
@@ -138,6 +185,11 @@ const form = ref({
   model_version: 'seedance2.0fast',
 })
 const submitting = ref(false)
+const hoverCard = ref('')
+
+const hasFiles = computed(() => {
+  return form.value.images.length || form.value.audios.length || form.value.videos.length
+})
 
 const imageInput = ref(null)
 const audioInput = ref(null)
@@ -170,10 +222,8 @@ function removeFile(type, index) {
 }
 
 function handlePromptInput(value) {
-  // 检测最后输入字符是否为 @
   const lastChar = value.slice(-1)
   if (lastChar === '@') {
-    // 只在有已上传文件时弹出
     if (form.value.images.length || form.value.audios.length || form.value.videos.length) {
       showMentionPopup.value = true
     }
@@ -184,7 +234,6 @@ function handlePromptInput(value) {
 
 function insertMention(type, index) {
   const mention = `@${type}${index}`
-  // 替换最后的 @ 为 mention
   form.value.prompt = form.value.prompt.slice(0, -1) + mention + ' '
   showMentionPopup.value = false
 }
@@ -223,70 +272,165 @@ async function submit() {
 </script>
 
 <style scoped>
+.submit-panel {
+  padding: 20px;
+}
+
 .panel-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin-bottom: 20px;
+}
+
+.section-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 10px;
+}
+
+.section-hint {
+  font-weight: 400;
+  color: #909399;
+  font-size: 11px;
+}
+
+/* 上传卡片网格 */
+.upload-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.upload-card {
+  border: 2px dashed #c0c4cc;
+  border-radius: 10px;
+  padding: 16px 8px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: #fff;
+}
+
+.upload-card:hover {
+  border-color: #409eff;
+  background: #f0f7ff;
+}
+
+.upload-icon {
+  font-size: 24px;
+  margin-bottom: 6px;
+}
+
+.upload-label {
+  font-size: 12px;
+  color: #606266;
+  font-weight: 500;
+}
+
+.upload-limit {
+  font-size: 10px;
+  color: #909399;
+  margin-top: 2px;
+}
+
+/* 已上传文件预览 */
+.file-preview {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.preview-item {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 16px;
-  font-size: 14px;
-  font-weight: 700;
-  color: #303133;
-}
-
-.upload-area {
-  border: 2px dashed #dcdfe6;
-  border-radius: 8px;
-  padding: 16px;
-  text-align: center;
-  background: #fafafa;
-}
-
-.upload-hint {
-  font-size: 12px;
-  color: #909399;
-  margin-bottom: 10px;
-}
-
-.upload-buttons {
-  display: flex;
-  gap: 8px;
-  justify-content: center;
-  margin-bottom: 10px;
-}
-
-.upload-preview {
-  display: flex;
   gap: 6px;
-  flex-wrap: wrap;
-  margin-top: 10px;
+  background: #f5f7fa;
+  border-radius: 8px;
+  padding: 6px 10px 6px 6px;
+  max-width: 180px;
 }
 
-.params-row {
+.preview-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
   display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
-.params-row .el-form-item {
-  flex: 1;
-  min-width: 120px;
+.preview-thumb-image { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+.preview-thumb-audio { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+.preview-thumb-video { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+
+.thumb-icon {
+  font-size: 12px;
 }
 
+.preview-name {
+  font-size: 11px;
+  color: #606266;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-remove {
+  width: 16px;
+  height: 16px;
+  background: #ff4d4f;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.preview-remove:hover {
+  background: #ff7875;
+}
+
+/* 提示词 */
 .prompt-container {
   position: relative;
+  margin-bottom: 16px;
 }
 
+.prompt-container :deep(.el-textarea__inner) {
+  background: #fafafa;
+  border-radius: 10px;
+  border: 1px solid #e4e7ed;
+  padding: 12px;
+  font-size: 13px;
+}
+
+.prompt-container :deep(.el-textarea__inner:focus) {
+  border-color: #409eff;
+  background: #fff;
+}
+
+/* @ 浮层 */
 .mention-popup {
   position: absolute;
   background: #fff;
   border: 1px solid #e4e7ed;
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  padding: 6px;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  padding: 8px;
   z-index: 10;
   max-height: 200px;
   overflow-y: auto;
-  width: 200px;
+  width: 220px;
   top: 100%;
   left: 0;
   margin-top: 4px;
@@ -302,25 +446,135 @@ async function submit() {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  padding: 2px 6px;
+  padding: 4px 8px;
 }
 
 .mention-item {
-  padding: 4px 6px;
+  padding: 6px 8px;
   cursor: pointer;
-  border-radius: 3px;
-  font-size: 11px;
+  border-radius: 6px;
+  font-size: 12px;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  transition: background 0.15s;
 }
 
 .mention-item:hover {
-  background: #ecf5ff;
+  background: #f0f7ff;
 }
 
 .filename {
   color: #909399;
   font-size: 10px;
+}
+
+/* 参数区 */
+.params-section {
+  background: #f8f9fa;
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 16px;
+}
+
+.params-section .section-label {
+  margin-bottom: 12px;
+}
+
+.param-row {
+  margin-bottom: 14px;
+}
+
+.param-row:last-child {
+  margin-bottom: 0;
+}
+
+.param-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.param-label {
+  font-size: 12px;
+  color: #606266;
+}
+
+.param-value {
+  font-size: 12px;
+  color: #409eff;
+  font-weight: 600;
+}
+
+/* 比例选择芯片 */
+.ratio-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.ratio-chip {
+  padding: 4px 12px;
+  border-radius: 14px;
+  font-size: 11px;
+  background: #e4e7ed;
+  color: #606266;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ratio-chip:hover {
+  background: #d3d4d6;
+}
+
+.ratio-chip.active {
+  background: #409eff;
+  color: #fff;
+}
+
+/* 模型选择 */
+.model-select {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.model-select :deep(.el-input__wrapper) {
+  border-radius: 8px;
+}
+
+/* 提交按钮 */
+.submit-btn {
+  width: 100%;
+  height: 44px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  box-shadow: 0 4px 14px rgba(102, 126, 234, 0.4);
+  transition: all 0.2s ease;
+}
+
+.submit-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+}
+
+.submit-btn:active {
+  transform: translateY(0);
+}
+
+.submit-btn:disabled {
+  background: #c0c4cc;
+  box-shadow: none;
+}
+
+.submit-hint {
+  text-align: center;
+  font-size: 12px;
+  color: #e6a23c;
+  margin-top: 8px;
 }
 </style>
