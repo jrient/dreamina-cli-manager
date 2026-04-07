@@ -1,100 +1,81 @@
 <!-- frontend/src/views/SubmitTask.vue -->
 <template>
-  <el-card class="submit-card">
-    <template #header>提交 Multimodal2Video 任务</template>
+  <div class="submit-panel">
+    <div class="panel-title">
+      <el-tag type="primary" effect="dark" size="small">NEW</el-tag>
+      <span>提交任务</span>
+    </div>
 
-    <el-form :model="form" label-width="100px" @submit.prevent="submit">
-
-      <!-- Images -->
-      <el-form-item label="图片">
-        <el-upload
-          v-model:file-list="form.images"
-          list-type="picture-card"
-          :auto-upload="false"
-          :limit="9"
-          accept="image/*"
-          multiple
-          :on-exceed="() => ElMessage.warning('最多 9 张图片')"
-        >
-          <el-icon><Plus /></el-icon>
-          <template #tip>
-            <div class="el-upload__tip">最多 9 张，至少 1 张图片或视频</div>
-          </template>
-        </el-upload>
+    <el-form :model="form" label-width="70px" label-position="top" @submit.prevent="submit">
+      <!-- 媒体上传区：合并为一个上传按钮组 -->
+      <el-form-item label="">
+        <div class="upload-area">
+          <div class="upload-hint">拖拽或点击上传媒体文件</div>
+          <div class="upload-buttons">
+            <el-button plain @click="triggerUpload('image')">🖼️ 图片</el-button>
+            <el-button plain @click="triggerUpload('audio')">🎵 音频</el-button>
+            <el-button plain @click="triggerUpload('video')">🎬 视频</el-button>
+          </div>
+          <div class="upload-preview">
+            <el-tag v-for="(img, i) in form.images" :key="i" closable @close="removeFile('images', i)">
+              🖼️ 图片{{ i + 1 }}: {{ img.name }}
+            </el-tag>
+            <el-tag v-for="(aud, i) in form.audios" :key="i" closable @close="removeFile('audios', i)">
+              🎵 音频{{ i + 1 }}: {{ aud.name }}
+            </el-tag>
+            <el-tag v-for="(vid, i) in form.videos" :key="i" closable @close="removeFile('videos', i)">
+              🎬 视频{{ i + 1 }}: {{ vid.name }}
+            </el-tag>
+          </div>
+        </div>
+        <!-- 隐藏的 file input -->
+        <input ref="imageInput" type="file" accept="image/*" multiple hidden @change="handleUpload('images', $event)">
+        <input ref="audioInput" type="file" accept="audio/*" multiple hidden @change="handleUpload('audios', $event)">
+        <input ref="videoInput" type="file" accept="video/*" multiple hidden @change="handleUpload('videos', $event)">
       </el-form-item>
 
-      <!-- Audio -->
-      <el-form-item label="音频">
-        <el-upload
-          v-model:file-list="form.audios"
-          :auto-upload="false"
-          :limit="3"
-          accept="audio/*"
-          multiple
-          :on-exceed="() => ElMessage.warning('最多 3 个音频')"
-        >
-          <el-button type="primary" plain>选择音频</el-button>
-          <template #tip><div class="el-upload__tip">最多 3 个，时长需 2-15 秒</div></template>
-        </el-upload>
-      </el-form-item>
-
-      <!-- Videos -->
-      <el-form-item label="参考视频">
-        <el-upload
-          v-model:file-list="form.videos"
-          :auto-upload="false"
-          :limit="3"
-          accept="video/*"
-          multiple
-          :on-exceed="() => ElMessage.warning('最多 3 个视频')"
-        >
-          <el-button type="primary" plain>选择视频</el-button>
-          <template #tip><div class="el-upload__tip">最多 3 个</div></template>
-        </el-upload>
-      </el-form-item>
-
-      <!-- Prompt -->
+      <!-- 提示词输入框 -->
       <el-form-item label="提示词">
-        <el-input v-model="form.prompt" type="textarea" :rows="3" placeholder="可选：描述生成内容" />
+        <el-input
+          v-model="form.prompt"
+          type="textarea"
+          :rows="3"
+          placeholder="可选：描述生成内容（输入 @ 引用已上传文件）"
+        />
       </el-form-item>
 
-      <!-- Duration -->
-      <el-form-item label="时长 (秒)">
-        <el-slider v-model="form.duration" :min="4" :max="15" :step="1" show-input style="width: 340px" />
-      </el-form-item>
-
-      <!-- Ratio -->
-      <el-form-item label="比例">
-        <el-radio-group v-model="form.ratio">
-          <el-radio-button v-for="r in ratios" :key="r" :label="r">{{ r }}</el-radio-button>
-        </el-radio-group>
-      </el-form-item>
-
-      <!-- Model -->
-      <el-form-item label="模型版本">
-        <el-select v-model="form.model_version" style="width: 220px">
-          <el-option v-for="m in models" :key="m.value" :label="m.label" :value="m.value" />
-        </el-select>
-      </el-form-item>
+      <!-- 参数行：横向排列 -->
+      <div class="params-row">
+        <el-form-item label="时长">
+          <el-slider v-model="form.duration" :min="4" :max="15" :step="1" show-input />
+        </el-form-item>
+        <el-form-item label="比例">
+          <el-radio-group v-model="form.ratio">
+            <el-radio-button v-for="r in ratios" :key="r" :label="r">{{ r }}</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="模型">
+          <el-select v-model="form.model_version">
+            <el-option v-for="m in models" :key="m.value" :label="m.label" :value="m.value" />
+          </el-select>
+        </el-form-item>
+      </div>
 
       <el-form-item>
         <el-button type="primary" native-type="submit" :loading="submitting" :disabled="!accountId">
-          提交任务
+          ▶ 提交任务
         </el-button>
         <el-text v-if="!accountId" type="warning" style="margin-left: 12px">请先选择账号</el-text>
       </el-form-item>
-
     </el-form>
-  </el-card>
+  </div>
 </template>
 
 <script setup>
 import { ref, inject } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '../api/index.js'
 
-const router = useRouter()
 const accountId = inject('selectedAccountId')
 
 const ratios = ['1:1', '16:9', '9:16', '4:3', '3:4', '21:9']
@@ -115,6 +96,29 @@ const form = ref({
   model_version: 'seedance2.0fast',
 })
 const submitting = ref(false)
+
+const imageInput = ref(null)
+const audioInput = ref(null)
+const videoInput = ref(null)
+
+function triggerUpload(type) {
+  if (type === 'image') imageInput.value.click()
+  else if (type === 'audio') audioInput.value.click()
+  else if (type === 'video') videoInput.value.click()
+}
+
+function handleUpload(type, event) {
+  const files = Array.from(event.target.files)
+  const current = form.value[type]
+  files.forEach(file => {
+    current.push({ name: file.name, raw: file })
+  })
+  event.target.value = ''
+}
+
+function removeFile(type, index) {
+  form.value[type].splice(index, 1)
+}
 
 async function submit() {
   if (!form.value.images.length && !form.value.videos.length) {
@@ -137,7 +141,10 @@ async function submit() {
   try {
     const task = await api.submitTask(fd)
     ElMessage.success(`任务已提交，ID: ${task.id}`)
-    router.push('/tasks')
+    form.value.images = []
+    form.value.audios = []
+    form.value.videos = []
+    form.value.prompt = ''
   } catch (e) {
     ElMessage.error('提交失败: ' + e.message)
   } finally {
@@ -147,5 +154,52 @@ async function submit() {
 </script>
 
 <style scoped>
-.submit-card { max-width: 780px; margin: 24px auto; }
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #303133;
+}
+
+.upload-area {
+  border: 2px dashed #dcdfe6;
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+  background: #fafafa;
+}
+
+.upload-hint {
+  font-size: 12px;
+  color: #909399;
+  margin-bottom: 10px;
+}
+
+.upload-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+
+.upload-preview {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.params-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.params-row .el-form-item {
+  flex: 1;
+  min-width: 120px;
+}
 </style>
