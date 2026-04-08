@@ -322,7 +322,7 @@ function getPromptText() {
     }
   }
   editor.childNodes.forEach(node => walk(node, true))
-  return text.trim()
+  return text.replace(/\u200B/g, '').trim()
 }
 
 function insertRefSpan(type, index, thumbnailUrl) {
@@ -332,6 +332,8 @@ function insertRefSpan(type, index, thumbnailUrl) {
     selection.removeAllRanges()
     selection.addRange(savedRange.value)
   }
+
+  if (!selection.rangeCount) return  // no range available, abort
 
   const range = selection.getRangeAt(0)
   range.deleteContents() // delete the @ character
@@ -354,9 +356,13 @@ function insertRefSpan(type, index, thumbnailUrl) {
 
   range.insertNode(span)
 
-  // Move cursor to after the span
+  // Insert trailing space so caret doesn't get trapped inside the chip boundary
+  const space = document.createTextNode('\u200B') // zero-width space
+  span.parentNode.insertBefore(space, span.nextSibling)
+
+  // Move cursor to after the space
   const after = document.createRange()
-  after.setStartAfter(span)
+  after.setStart(space, 1)
   after.collapse(true)
   selection.removeAllRanges()
   selection.addRange(after)
