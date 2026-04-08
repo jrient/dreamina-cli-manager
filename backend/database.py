@@ -17,8 +17,38 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 """
 
+CREATE_PROJECTS_SQL = """
+CREATE TABLE IF NOT EXISTS projects (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    deleted_at  TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+"""
+
+CREATE_MATERIALS_SQL = """
+CREATE TABLE IF NOT EXISTS materials (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    type        TEXT NOT NULL,
+    file_path   TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    FOREIGN KEY (project_id) REFERENCES projects(id)
+);
+"""
+
 MIGRATE_ADD_SUBMIT_ID_SQL = """
 ALTER TABLE tasks ADD COLUMN submit_id TEXT;
+"""
+
+MIGRATE_ADD_PROJECT_ID_SQL = """
+ALTER TABLE tasks ADD COLUMN project_id TEXT;
+"""
+
+MIGRATE_ADD_LABEL_SQL = """
+ALTER TABLE tasks ADD COLUMN label TEXT;
 """
 
 async def get_db() -> aiosqlite.Connection:
@@ -28,11 +58,16 @@ async def get_db() -> aiosqlite.Connection:
 
 async def init_db():
     async with aiosqlite.connect(str(DB_PATH)) as db:
+        # 创建基础表
         await db.execute(CREATE_TASKS_SQL)
+        await db.execute(CREATE_PROJECTS_SQL)
+        await db.execute(CREATE_MATERIALS_SQL)
         await db.commit()
-        # 尝试迁移：如果 submit_id 列不存在则添加
-        try:
-            await db.execute(MIGRATE_ADD_SUBMIT_ID_SQL)
-            await db.commit()
-        except aiosqlite.OperationalError:
-            pass  # 列已存在，跳过
+
+        # 迁移 tasks 表
+        for migrate_sql in [MIGRATE_ADD_SUBMIT_ID_SQL, MIGRATE_ADD_PROJECT_ID_SQL, MIGRATE_ADD_LABEL_SQL]:
+            try:
+                await db.execute(migrate_sql)
+                await db.commit()
+            except aiosqlite.OperationalError:
+                pass  # 列已存在，跳过

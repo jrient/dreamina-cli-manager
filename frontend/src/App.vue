@@ -9,7 +9,9 @@
         <AccountSelector />
       </div>
       <div class="header-right">
+        <el-button text @click="$router.push('/projects')">项目</el-button>
         <el-button text @click="$router.push('/accounts')">账号管理</el-button>
+        <el-button text @click="$router.push('/admin')">Admin</el-button>
       </div>
     </el-header>
     <el-main class="app-main">
@@ -41,6 +43,10 @@ body { margin: 0; }
   font-size: 18px;
   font-weight: bold;
   color: #fff;
+}
+.header-right {
+  display: flex;
+  gap: 8px;
 }
 .app-main {
   padding: 0;

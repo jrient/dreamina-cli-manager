@@ -64,13 +64,13 @@
       </div>
 
       <div v-if="task.status === 'success' && task.result_url" class="task-result">
-        <el-button type="success" :href="task.result_url" target="_blank">
+        <el-link :href="task.result_url" target="_blank" type="success">
           <el-icon><Download /></el-icon> 下载视频
-        </el-button>
+        </el-link>
       </div>
 
       <div v-if="task.status === 'failed'" class="task-error">
-        <el-text type="danger" size="small">{{ task.error_msg }}</el-text>
+        <el-text type="danger" size="small">{{ task.error_msg || '任务失败，原因未知' }}</el-text>
         <el-alert
           v-if="task.error_msg && task.error_msg.includes('ComplianceConfirmation')"
           title="请先在 Dreamina Web 端完成合规授权后重试"

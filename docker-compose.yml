@@ -16,7 +16,7 @@ services:
       - DB_PATH=/app/db/tasks.db
       - UPLOAD_DIR=/tmp/uploads
       - RESULTS_DIR=/app/results
-      - POLL_INTERVAL=10
+      - POLL_INTERVAL=60
     volumes:
       - ./accounts:/app/accounts:ro
       - ./db:/app/db

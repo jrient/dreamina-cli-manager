@@ -1,10 +1,19 @@
 # backend/tests/conftest.py
 import os
+import sys
+
 # 在导入其他模块之前设置测试环境变量
 os.environ["ACCOUNTS_DIR"] = "/tmp/jm_auto_test/accounts"
 os.environ["CONFIG_BASE"] = "/tmp/jm_auto_test/configs"
 os.environ["DB_PATH"] = "/tmp/jm_auto_test/db/tasks.db"
 os.environ["UPLOAD_DIR"] = "/tmp/jm_auto_test/uploads"
+os.environ["RESULTS_DIR"] = "/tmp/jm_auto_test/results"
+
+# 确保测试目录存在
+for path in [os.environ["ACCOUNTS_DIR"], os.environ["CONFIG_BASE"],
+             os.environ["UPLOAD_DIR"], os.environ["RESULTS_DIR"],
+             os.path.dirname(os.environ["DB_PATH"])]:
+    os.makedirs(path, exist_ok=True)
 
 import pytest
 import pytest_asyncio

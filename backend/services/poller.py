@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import os
 import aiohttp
 import aiosqlite
 from datetime import datetime, timezone
@@ -49,13 +50,16 @@ async def download_result(task_id: str, result_url: str) -> str | None:
         return None
 
 
+TASK_TIMEOUT_HOURS = int(os.getenv("TASK_TIMEOUT_HOURS", "6"))
+
+
 async def poll_tasks():
     """Check all pending/processing tasks and update their status."""
     try:
         async with aiosqlite.connect(str(DB_PATH)) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
-                "SELECT id, account_id, submit_id FROM tasks WHERE status IN ('pending', 'processing')"
+                "SELECT id, account_id, submit_id, updated_at FROM tasks WHERE status IN ('pending', 'processing')"
             )
             rows = await cursor.fetchall()
 
@@ -63,23 +67,50 @@ async def poll_tasks():
             task_id = row["id"]
             submit_id = row["submit_id"]
             account_id = row["account_id"]
+            # 超时检查优先（包括 submit_id 为空的损坏任务）
+            now = datetime.now(timezone.utc)
+            try:
+                updated_at = datetime.fromisoformat(row["updated_at"].replace("Z", "+00:00"))
+                if updated_at.tzinfo is None:
+                    updated_at = updated_at.replace(tzinfo=timezone.utc)
+                age_hours = (now - updated_at).total_seconds() / 3600
+                if age_hours > TASK_TIMEOUT_HOURS:
+                    async with aiosqlite.connect(str(DB_PATH)) as db:
+                        await db.execute(
+                            "UPDATE tasks SET status='failed', error_msg=?, updated_at=? WHERE id=?",
+                            (f"任务超时（超过 {TASK_TIMEOUT_HOURS} 小时无响应）", now.isoformat(), task_id),
+                        )
+                        await db.commit()
+                    logger.warning(f"Task {task_id} timed out after {age_hours:.1f}h")
+                    continue
+            except Exception:
+                pass
+
             if not submit_id:
-                continue  # pending 但无 submit_id，跳过
+                continue  # 无 submit_id 且未超时，跳过
+
             try:
                 result = await query_result(account_id=account_id, submit_id=submit_id)
-                now = datetime.now(timezone.utc).isoformat()
+                now_str = now.isoformat()
 
                 # 如果任务成功且有结果URL，下载到本地
                 local_path = None
                 if result["status"] == "success" and result["result_url"]:
                     local_path = await download_result(task_id, result["result_url"])
 
-                # 更新数据库：优先使用本地路径
-                final_url = local_path if local_path else result["result_url"]
+                # 更新数据库：优先使用本地路径（转为 web URL）
+                if local_path:
+                    # local_path 是容器内路径如 /app/results/<task_id>/result.mp4
+                    # 转为 web URL: /results/<task_id>/result.mp4
+                    import os
+                    rel_path = local_path.replace("/app/results/", "/results/")
+                    final_url = rel_path
+                else:
+                    final_url = result["result_url"]
                 async with aiosqlite.connect(str(DB_PATH)) as db:
                     await db.execute(
                         "UPDATE tasks SET status=?, result_url=?, error_msg=?, updated_at=? WHERE id=?",
-                        (result["status"], final_url, result["error_msg"], now, task_id),
+                        (result["status"], final_url, result["error_msg"], now_str, task_id),
                     )
                     await db.commit()
                 logger.info(f"Task {task_id}: {result['status']}" + (f" (downloaded)" if local_path else ""))
@@ -145,9 +176,9 @@ async def dispatch_queued_tasks():
                     await db.commit()
                 logger.info(f"Queued task {task_id} submitted as {submit_id}")
             except ConcurrencyLimitError:
-                # 仍然限流，下次再试
+                # 仍然限流，跳过该账号，继续尝试其他任务
                 logger.debug(f"Task {task_id} still queued (concurrency limit)")
-                break  # 其他账号可能也满了，停止本轮
+                continue
             except Exception as e:
                 # 真实错误，标记失败
                 now = datetime.now(timezone.utc).isoformat()

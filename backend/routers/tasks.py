@@ -33,6 +33,8 @@ def _row_to_task(row) -> TaskResponse:
         params=row["params"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        project_id=row["project_id"] if "project_id" in row.keys() else None,
+        label=row["label"] if "label" in row.keys() else None,
     )
 
 
@@ -43,6 +45,8 @@ async def create_task(
     duration: int = Form(5),
     ratio: str = Form("16:9"),
     model_version: str = Form("seedance2.0fast"),
+    project_id: Optional[str] = Form(None),
+    label: Optional[str] = Form(None),
     images: list[UploadFile] = File(default=[]),
     videos: list[UploadFile] = File(default=[]),
     audios: list[UploadFile] = File(default=[]),
@@ -143,8 +147,8 @@ async def create_task(
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         await db.execute(
-            "INSERT INTO tasks (id, account_id, status, submit_id, result_url, error_msg, prompt, params, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (task_id, account_id, task_status, submit_id, None, None, prompt, params, now, now),
+            "INSERT INTO tasks (id, account_id, status, submit_id, result_url, error_msg, prompt, params, created_at, updated_at, project_id, label) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (task_id, account_id, task_status, submit_id, None, None, prompt, params, now, now, project_id, label),
         )
         await db.commit()
         cursor = await db.execute("SELECT * FROM tasks WHERE id=?", (task_id,))
@@ -154,7 +158,7 @@ async def create_task(
 
 
 @router.get("", response_model=list[TaskResponse])
-async def list_tasks(status: Optional[str] = None, account_id: Optional[str] = None):
+async def list_tasks(status: Optional[str] = None, account_id: Optional[str] = None, project_id: Optional[str] = None):
     query = "SELECT * FROM tasks WHERE 1=1"
     params = []
     if status:
@@ -163,6 +167,9 @@ async def list_tasks(status: Optional[str] = None, account_id: Optional[str] = N
     if account_id:
         query += " AND account_id=?"
         params.append(account_id)
+    if project_id:
+        query += " AND project_id=?"
+        params.append(project_id)
     query += " ORDER BY created_at DESC"
 
     async with aiosqlite.connect(str(DB_PATH)) as db:
@@ -198,3 +205,75 @@ async def delete_task(task_id: str):
         shutil.rmtree(task_dir, ignore_errors=True)
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{task_id}/copy", status_code=status.HTTP_201_CREATED, response_model=TaskResponse)
+async def copy_task(task_id: str):
+    """复制任务：包括项目关联、媒体文件、提示词、标签等"""
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM tasks WHERE id=?", (task_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(404, "Task not found")
+
+        # 获取原任务数据
+        original = _row_to_task(row)
+        params_data = json.loads(original.params or "{}")
+
+    # 生成新任务ID
+    new_task_id = uuid.uuid4().hex[:12]
+    new_task_dir = UPLOAD_DIR / new_task_id
+    new_task_dir.mkdir(parents=True, exist_ok=True)
+
+    # 复制媒体文件
+    original_task_dir = UPLOAD_DIR / task_id
+    new_image_paths = []
+    new_video_paths = []
+    new_audio_paths = []
+
+    for path in params_data.get("image_paths", []):
+        original_path = Path(path)
+        if original_path.exists():
+            new_path = new_task_dir / original_path.name
+            shutil.copy2(original_path, new_path)
+            new_image_paths.append(str(new_path))
+
+    for path in params_data.get("video_paths", []):
+        original_path = Path(path)
+        if original_path.exists():
+            new_path = new_task_dir / original_path.name
+            shutil.copy2(original_path, new_path)
+            new_video_paths.append(str(new_path))
+
+    for path in params_data.get("audio_paths", []):
+        original_path = Path(path)
+        if original_path.exists():
+            new_path = new_task_dir / original_path.name
+            shutil.copy2(original_path, new_path)
+            new_audio_paths.append(str(new_path))
+
+    # 更新 params
+    new_params = json.dumps({
+        "duration": params_data.get("duration", 5),
+        "ratio": params_data.get("ratio", "16:9"),
+        "model_version": params_data.get("model_version", "seedance2.0fast"),
+        "image_paths": new_image_paths,
+        "video_paths": new_video_paths,
+        "audio_paths": new_audio_paths,
+    })
+
+    now = _now()
+
+    # 创建新任务（状态为 queued，等待提交）
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        await db.execute(
+            "INSERT INTO tasks (id, account_id, status, submit_id, result_url, error_msg, prompt, params, created_at, updated_at, project_id, label) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (new_task_id, original.account_id, "queued", None, None, None, original.prompt, new_params, now, now, original.project_id, original.label),
+        )
+        await db.commit()
+        cursor = await db.execute("SELECT * FROM tasks WHERE id=?", (new_task_id,))
+        row = await cursor.fetchone()
+
+    return _row_to_task(row)

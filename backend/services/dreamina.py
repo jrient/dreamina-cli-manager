@@ -66,7 +66,7 @@ async def import_credentials(account_id: str, credentials_json: str) -> tuple[bo
     return True, ""
 
 
-async def run_cli(args: list[str], account_id: str, stdin: Optional[str] = None) -> tuple[int, str, str]:
+async def run_cli(args: list[str], account_id: str, stdin: Optional[str] = None, timeout: int = 120) -> tuple[int, str, str]:
     """Run dreamina CLI with account isolation. Returns (returncode, stdout, stderr)."""
     env = get_account_env(account_id)
     proc = await asyncio.create_subprocess_exec(
@@ -77,7 +77,12 @@ async def run_cli(args: list[str], account_id: str, stdin: Optional[str] = None)
         env=env,
     )
     stdin_bytes = stdin.encode() if stdin else None
-    stdout, stderr = await proc.communicate(input=stdin_bytes)
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(input=stdin_bytes), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError(f"dreamina CLI timed out after {timeout}s: {args[0]}")
     return proc.returncode, stdout.decode(), stderr.decode()
 
 

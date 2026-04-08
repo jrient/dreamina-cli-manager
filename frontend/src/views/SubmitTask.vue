@@ -4,6 +4,18 @@
     <div class="panel-title">✨ 创建新任务</div>
 
     <el-form :model="form" label-position="top" @submit.prevent="submit">
+      <!-- 项目和标签 -->
+      <div class="project-row" v-if="showProjectFields">
+        <el-form-item label="项目" class="project-select-item">
+          <el-select v-model="form.project_id" placeholder="选择项目" clearable>
+            <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="标签" class="label-input-item">
+          <el-input v-model="form.label" placeholder="可选标签" maxlength="50" show-word-limit />
+        </el-form-item>
+      </div>
+
       <!-- 媒体上传区：卡片化设计 -->
       <div class="section-label">媒体文件</div>
       <div class="upload-grid">
@@ -165,10 +177,15 @@
 </template>
 
 <script setup>
-import { ref, inject, computed } from 'vue'
+import { ref, inject, computed, onMounted, watch } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { ElMessage } from 'element-plus'
 import { api } from '../api/index.js'
+
+const props = defineProps({
+  projectId: { type: String, default: '' }
+})
+const emit = defineEmits(['submitted'])
 
 const accountId = inject('selectedAccountId')
 
@@ -180,6 +197,7 @@ const models = [
   { label: 'Fast VIP', value: 'seedance2.0fast_vip', icon: '💎' },
 ]
 
+const projects = ref([])
 const form = ref({
   images: [],
   audios: [],
@@ -188,9 +206,17 @@ const form = ref({
   duration: 5,
   ratio: '16:9',
   model_version: 'seedance2.0fast',
+  project_id: '',
+  label: '',
 })
 const submitting = ref(false)
 const hoverCard = ref('')
+
+const showProjectFields = computed(() => props.projectId)
+
+watch(() => props.projectId, (val) => {
+  form.value.project_id = val
+})
 
 const hasFiles = computed(() => {
   return form.value.images.length || form.value.audios.length || form.value.videos.length
@@ -265,6 +291,8 @@ async function submit() {
   fd.append('duration', form.value.duration)
   fd.append('ratio', form.value.ratio)
   fd.append('model_version', form.value.model_version)
+  if (form.value.project_id) fd.append('project_id', form.value.project_id)
+  if (form.value.label) fd.append('label', form.value.label)
 
   form.value.images.forEach(f => fd.append('images', f.raw))
   form.value.audios.forEach(f => fd.append('audios', f.raw))
@@ -278,12 +306,30 @@ async function submit() {
     form.value.audios = []
     form.value.videos = []
     form.value.prompt = ''
+    form.value.label = ''
+    emit('submitted')
   } catch (e) {
     ElMessage.error('提交失败: ' + e.message)
   } finally {
     submitting.value = false
   }
 }
+
+async function loadProjects() {
+  try {
+    projects.value = await api.listProjects()
+  } catch (e) {
+    // ignore
+  }
+}
+
+onMounted(() => {
+  if (props.projectId) {
+    form.value.project_id = props.projectId
+  } else {
+    loadProjects()
+  }
+})
 </script>
 
 <style scoped>
@@ -296,6 +342,17 @@ async function submit() {
   font-weight: 700;
   color: #1a1a2e;
   margin-bottom: 20px;
+}
+
+.project-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.project-select-item, .label-input-item {
+  flex: 1;
+  margin-bottom: 0;
 }
 
 .section-label {
