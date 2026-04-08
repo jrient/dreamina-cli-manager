@@ -83,42 +83,46 @@
         ></div>
         <!-- @ 浮层 -->
         <div v-if="showMentionPopup" class="mention-popup">
-          <div v-if="form.images.length" class="mention-group">
-            <div class="group-title">图片</div>
+          <!-- 项目素材 -->
+          <div v-if="projectMaterials.length" class="mention-group">
+            <div class="group-title">项目素材</div>
             <div
-              v-for="(img, i) in form.images"
-              :key="i"
+              v-for="m in projectMaterials"
+              :key="'mat-'+m.id"
               class="mention-item"
-              @mousedown.prevent="insertMention('image', i + 1, img.preview)"
+              @mousedown.prevent="insertMentionMaterial(m)"
             >
+              <div class="mention-thumb">
+                <img v-if="m.type === 'image'" :src="getMaterialUrl(m.file_path)" class="mention-thumb-img" />
+                <span v-else>🎵</span>
+              </div>
+              <span>{{ m.name }}</span>
+            </div>
+          </div>
+          <!-- 已上传文件 -->
+          <div v-if="form.images.length || form.audios.length || form.videos.length" class="mention-group">
+            <div class="group-title">已上传</div>
+            <div v-for="(img, i) in form.images" :key="'ui-'+i" class="mention-item"
+                 @mousedown.prevent="insertMentionUpload('image', i+1, img.preview)">
               <div class="mention-thumb">
                 <img v-if="img.preview" :src="img.preview" class="mention-thumb-img" />
                 <span v-else>🖼️</span>
               </div>
-              <span>图片{{ i + 1 }} <span class="filename">{{ img.name }}</span></span>
+              <span>图片{{ i+1 }} <span class="filename">{{ img.name }}</span></span>
+            </div>
+            <div v-for="(aud, i) in form.audios" :key="'ua-'+i" class="mention-item"
+                 @mousedown.prevent="insertMentionUpload('audio', i+1, null)">
+              <span>🎵 音频{{ i+1 }} <span class="filename">{{ aud.name }}</span></span>
+            </div>
+            <div v-for="(vid, i) in form.videos" :key="'uv-'+i" class="mention-item"
+                 @mousedown.prevent="insertMentionUpload('video', i+1, null)">
+              <span>🎬 视频{{ i+1 }} <span class="filename">{{ vid.name }}</span></span>
             </div>
           </div>
-          <div v-if="form.audios.length" class="mention-group">
-            <div class="group-title">音频</div>
-            <div
-              v-for="(aud, i) in form.audios"
-              :key="i"
-              class="mention-item"
-              @mousedown.prevent="insertMention('audio', i + 1, null)"
-            >
-              <span>🎵 音频{{ i + 1 }} <span class="filename">{{ aud.name }}</span></span>
-            </div>
-          </div>
-          <div v-if="form.videos.length" class="mention-group">
-            <div class="group-title">视频</div>
-            <div
-              v-for="(vid, i) in form.videos"
-              :key="i"
-              class="mention-item"
-              @mousedown.prevent="insertMention('video', i + 1, null)"
-            >
-              <span>🎬 视频{{ i + 1 }} <span class="filename">{{ vid.name }}</span></span>
-            </div>
+          <!-- 空状态 -->
+          <div v-if="!projectMaterials.length && !form.images.length && !form.audios.length && !form.videos.length"
+               class="mention-empty">
+            暂无可引用素材
           </div>
         </div>
       </div>
@@ -213,9 +217,18 @@ const hoverCard = ref('')
 
 const showProjectFields = computed(() => props.projectId)
 
-watch(() => props.projectId, (val) => {
+watch(() => props.projectId, async (val) => {
   form.value.project_id = val
-})
+  if (val) {
+    try {
+      projectMaterials.value = await api.listMaterials(val)
+    } catch (e) {
+      projectMaterials.value = []
+    }
+  } else {
+    projectMaterials.value = []
+  }
+}, { immediate: true })
 
 const hasFiles = computed(() => {
   return form.value.images.length || form.value.audios.length || form.value.videos.length
@@ -228,6 +241,13 @@ const promptEditor = ref(null)
 const promptContainer = ref(null)
 const showMentionPopup = ref(false)
 const savedRange = ref(null)
+
+const projectMaterials = ref([])
+const materialMap = ref({}) // { materialId: { type: 'image'|'audio', index: N } }
+
+function getMaterialUrl(filePath) {
+  return '/uploads/materials/' + filePath.split('/').pop()
+}
 
 onClickOutside(promptContainer, () => {
   showMentionPopup.value = false
@@ -376,6 +396,52 @@ function insertMention(type, index, thumbnail) {
   insertRefSpan(type, index, thumbnail || null)
 }
 
+async function insertMentionMaterial(material) {
+  showMentionPopup.value = false
+
+  // Already referenced — reuse existing position
+  if (materialMap.value[material.id]) {
+    const ref = materialMap.value[material.id]
+    const thumb = material.type === 'image' ? getMaterialUrl(material.file_path) : null
+    insertRefSpan(ref.type, ref.index, thumb)
+    return
+  }
+
+  // Fetch material file as blob and add to upload list
+  try {
+    const url = getMaterialUrl(material.file_path)
+    const resp = await fetch(url)
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const blob = await resp.blob()
+    const ext = url.split('.').pop()
+    const file = new File([blob], `${material.name}.${ext}`, { type: blob.type })
+
+    let refType, refIndex, thumbUrl
+
+    if (material.type === 'image') {
+      const preview = URL.createObjectURL(blob)
+      form.value.images.push({ name: file.name, raw: file, preview, materialId: material.id })
+      refIndex = form.value.images.length
+      refType = 'image'
+      thumbUrl = preview
+    } else {
+      form.value.audios.push({ name: file.name, raw: file, materialId: material.id })
+      refIndex = form.value.audios.length
+      refType = 'audio'
+      thumbUrl = null
+    }
+
+    materialMap.value[material.id] = { type: refType, index: refIndex }
+    insertRefSpan(refType, refIndex, thumbUrl)
+  } catch (e) {
+    ElMessage.error('加载素材失败: ' + e.message)
+  }
+}
+
+function insertMentionUpload(type, index, thumbnail) {
+  insertRefSpan(type, index, thumbnail)
+}
+
 async function submit() {
   if (!form.value.images.length && !form.value.videos.length) {
     ElMessage.error('至少需要 1 张图片或 1 个参考视频')
@@ -403,6 +469,7 @@ async function submit() {
     form.value.images = []
     form.value.audios = []
     form.value.videos = []
+    materialMap.value = {}
     if (promptEditor.value) promptEditor.value.innerHTML = ''
     form.value.label = ''
     emit('submitted')
@@ -695,6 +762,13 @@ onMounted(() => {
 .filename {
   color: #909399;
   font-size: 10px;
+}
+
+.mention-empty {
+  padding: 12px 8px;
+  color: #909399;
+  font-size: 12px;
+  text-align: center;
 }
 
 /* 参数区 */
