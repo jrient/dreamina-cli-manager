@@ -14,8 +14,14 @@ from services.dreamina import query_result, submit_multimodal2video, Concurrency
 logger = logging.getLogger(__name__)
 
 
-async def download_result(task_id: str, result_url: str) -> str | None:
-    """下载任务结果文件到本地，返回本地路径"""
+async def download_result(task_id: str, result_url: str, max_retries: int = 3) -> str | None:
+    """下载任务结果文件到本地，返回本地路径
+
+    Args:
+        task_id: 任务ID
+        result_url: 结果文件URL
+        max_retries: 最大重试次数，默认3次
+    """
     if not result_url:
         return None
 
@@ -34,20 +40,25 @@ async def download_result(task_id: str, result_url: str) -> str | None:
 
     local_path = task_result_dir / f"result{ext}"
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(result_url, timeout=aiohttp.ClientTimeout(total=300)) as resp:
-                if resp.status == 200:
-                    content = await resp.read()
-                    local_path.write_bytes(content)
-                    logger.info(f"Downloaded result for task {task_id} to {local_path}")
-                    return str(local_path)
-                else:
-                    logger.warning(f"Failed to download {result_url}: HTTP {resp.status}")
-                    return None
-    except Exception as e:
-        logger.error(f"Download error for task {task_id}: {e}")
-        return None
+    for attempt in range(max_retries):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(result_url, timeout=aiohttp.ClientTimeout(total=300)) as resp:
+                    if resp.status == 200:
+                        content = await resp.read()
+                        local_path.write_bytes(content)
+                        logger.info(f"Downloaded result for task {task_id} to {local_path}")
+                        return str(local_path)
+                    else:
+                        logger.warning(f"Failed to download {result_url}: HTTP {resp.status} (attempt {attempt + 1}/{max_retries})")
+        except Exception as e:
+            logger.warning(f"Download error for task {task_id} (attempt {attempt + 1}/{max_retries}): {e}")
+
+        if attempt < max_retries - 1:
+            await asyncio.sleep(2 ** attempt)  # 指数退避: 1s, 2s, 4s
+
+    logger.error(f"Failed to download result for task {task_id} after {max_retries} attempts")
+    return None
 
 
 TASK_TIMEOUT_HOURS = int(os.getenv("TASK_TIMEOUT_HOURS", "6"))
