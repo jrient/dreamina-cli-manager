@@ -18,6 +18,20 @@
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="任务数量" width="120">
+        <template #default="{ row }">
+          <span v-if="taskCounts[row.id]">
+            <template v-if="taskCounts[row.id].queued > 0">
+              {{ taskCounts[row.id].active }}+{{ taskCounts[row.id].queued }}
+            </template>
+            <template v-else-if="taskCounts[row.id].active > 0">
+              {{ taskCounts[row.id].active }}
+            </template>
+            <span v-else style="color: #909399">-</span>
+          </span>
+          <span v-else style="color: #909399">-</span>
+        </template>
+      </el-table-column>
       <el-table-column label="积分余额" width="150">
         <template #default="{ row }">
           <span v-if="row.credit">{{ formatCredit(row.credit) }}</span>
@@ -159,6 +173,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const accounts = ref([])
+const taskCounts = ref({})
 const loading = ref(false)
 const refreshingId = ref(null)
 const showCreateDialog = ref(false)
@@ -174,7 +189,17 @@ const loginResult = ref({})
 
 onMounted(() => {
   fetchAccounts()
+  fetchTaskCounts()
 })
+
+async function fetchTaskCounts() {
+  try {
+    const resp = await fetch('/api/tasks/counts')
+    if (resp.ok) taskCounts.value = await resp.json()
+  } catch (e) {
+    // ignore
+  }
+}
 
 async function fetchAccounts() {
   loading.value = true

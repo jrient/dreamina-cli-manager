@@ -1,8 +1,6 @@
 <!-- frontend/src/views/SubmitTask.vue -->
 <template>
   <div class="submit-panel">
-    <div class="panel-title">✨ 创建新任务</div>
-
     <el-form :model="form" label-position="top" @submit.prevent="submit">
       <!-- 项目和标签 -->
       <div class="project-row" v-if="showProjectFields">
@@ -20,19 +18,13 @@
       <div class="section-label">媒体文件</div>
       <div class="upload-grid">
         <div class="upload-card" @click="triggerUpload('image')" @mouseenter="hoverCard = 'image'" @mouseleave="hoverCard = ''">
-          <div class="upload-icon">🖼️</div>
-          <div class="upload-label">添加图片</div>
-          <div class="upload-limit">最多9张</div>
+          <span class="upload-icon">🖼️</span><span class="upload-label">图片</span>
         </div>
         <div class="upload-card" @click="triggerUpload('audio')" @mouseenter="hoverCard = 'audio'" @mouseleave="hoverCard = ''">
-          <div class="upload-icon">🎵</div>
-          <div class="upload-label">添加音频</div>
-          <div class="upload-limit">最多3个</div>
+          <span class="upload-icon">🎵</span><span class="upload-label">音频</span>
         </div>
         <div class="upload-card" @click="triggerUpload('video')" @mouseenter="hoverCard = 'video'" @mouseleave="hoverCard = ''">
-          <div class="upload-icon">🎬</div>
-          <div class="upload-label">添加视频</div>
-          <div class="upload-limit">最多3个</div>
+          <span class="upload-icon">🎬</span><span class="upload-label">视频</span>
         </div>
       </div>
 
@@ -129,8 +121,6 @@
 
       <!-- 生成参数区 -->
       <div class="params-section">
-        <div class="section-label">生成参数</div>
-
         <!-- 时长滑块 -->
         <div class="param-row">
           <div class="param-header">
@@ -180,7 +170,7 @@
 </template>
 
 <script setup>
-import { ref, inject, computed, onMounted, watch } from 'vue'
+import { ref, inject, computed, onMounted, watch, nextTick } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { ElMessage } from 'element-plus'
 import { api } from '../api/index.js'
@@ -207,7 +197,7 @@ const form = ref({
   videos: [],
   prompt: '',
   duration: 5,
-  ratio: '16:9',
+  ratio: '9:16',
   model_version: 'seedance2.0fast',
   project_id: '',
   label: '',
@@ -522,6 +512,89 @@ async function loadProjects() {
   }
 }
 
+async function fillForm(task) {
+  // 清空当前文件
+  form.value.images.forEach(f => { if (f.preview) URL.revokeObjectURL(f.preview) })
+  form.value.images = []
+  form.value.audios = []
+  form.value.videos = []
+  materialMap.value = {}
+
+  // 填充参数
+  const params = task.params ? JSON.parse(task.params) : {}
+  if (params.duration) form.value.duration = params.duration
+  if (params.ratio) form.value.ratio = params.ratio
+  if (params.model_version) form.value.model_version = params.model_version
+  form.value.label = task.label || ''
+
+  // 抓取单个文件，返回 item 或 null（保留顺序）
+  async function fetchFile(serverPath, isImage) {
+    const match = serverPath.match(/uploads\/(.+)$/)
+    if (!match) return null
+    const url = '/uploads/' + match[1].split('/').map(encodeURIComponent).join('/')
+    try {
+      const resp = await fetch(url)
+      if (!resp.ok) return null
+      const blob = await resp.blob()
+      const filename = serverPath.split('/').pop()
+      const file = new File([blob], filename, { type: blob.type })
+      const item = { name: filename, raw: file }
+      if (isImage) item.preview = URL.createObjectURL(blob)
+      return item
+    } catch (e) {
+      return null
+    }
+  }
+
+  // 并发抓取，保留顺序（Promise.all 保证结果顺序与输入一致）
+  const [imageItems, audioItems, videoItems] = await Promise.all([
+    Promise.all((params.image_paths || []).map(p => fetchFile(p, true))),
+    Promise.all((params.audio_paths || []).map(p => fetchFile(p, false))),
+    Promise.all((params.video_paths || []).map(p => fetchFile(p, false))),
+  ])
+  form.value.images = imageItems.filter(Boolean)
+  form.value.audios = audioItems.filter(Boolean)
+  form.value.videos = videoItems.filter(Boolean)
+
+  await nextTick()
+
+  // 重建 prompt：将 @图片N/@音频N/@视频N 转为 span chip
+  if (promptEditor.value) {
+    promptEditor.value.innerHTML = ''
+    const promptText = task.prompt || ''
+    const parts = promptText.split(/(@(?:图片|音频|视频)\d)/g)
+    const typeMap = { '图片': 'image', '音频': 'audio', '视频': 'video' }
+    parts.forEach(part => {
+      const m = part.match(/^@(图片|音频|视频)(\d)$/)
+      if (m) {
+        const type = typeMap[m[1]]
+        const index = parseInt(m[2])
+        const span = document.createElement('span')
+        span.contentEditable = 'false'
+        span.dataset.refType = type
+        span.dataset.refIndex = String(index)
+        span.className = 'prompt-ref'
+        if (type === 'image' && form.value.images[index - 1]?.preview) {
+          const img = document.createElement('img')
+          img.src = form.value.images[index - 1].preview
+          span.appendChild(img)
+        } else {
+          span.classList.add('prompt-ref-icon')
+          span.textContent = type === 'audio' ? '🎵' : type === 'video' ? '🎬' : '🖼'
+        }
+        promptEditor.value.appendChild(span)
+        promptEditor.value.appendChild(document.createTextNode('\u200B'))
+      } else if (part) {
+        promptEditor.value.appendChild(document.createTextNode(part))
+      }
+    })
+  }
+
+  ElMessage.success('已填充到表单，可修改后提交')
+}
+
+defineExpose({ fillForm })
+
 onMounted(() => {
   if (props.projectId) {
     form.value.project_id = props.projectId
@@ -534,13 +607,6 @@ onMounted(() => {
 <style scoped>
 .submit-panel {
   padding: 20px;
-}
-
-.panel-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: #1a1a2e;
-  margin-bottom: 20px;
 }
 
 .project-row {
@@ -577,12 +643,16 @@ onMounted(() => {
 
 .upload-card {
   border: 2px dashed #c0c4cc;
-  border-radius: 10px;
-  padding: 16px 8px;
+  border-radius: 8px;
+  padding: 6px 10px;
   text-align: center;
   cursor: pointer;
   transition: all 0.2s ease;
   background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
 
 .upload-card:hover {
@@ -591,8 +661,8 @@ onMounted(() => {
 }
 
 .upload-icon {
-  font-size: 24px;
-  margin-bottom: 6px;
+  font-size: 14px;
+  line-height: 1;
 }
 
 .upload-label {
@@ -601,11 +671,6 @@ onMounted(() => {
   font-weight: 500;
 }
 
-.upload-limit {
-  font-size: 10px;
-  color: #909399;
-  margin-top: 2px;
-}
 
 /* 已上传文件预览 */
 .file-preview {
@@ -813,10 +878,6 @@ onMounted(() => {
   border-radius: 12px;
   padding: 14px;
   margin-bottom: 16px;
-}
-
-.params-section .section-label {
-  margin-bottom: 12px;
 }
 
 .param-row {

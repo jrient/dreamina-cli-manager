@@ -164,7 +164,7 @@ async def dispatch_queued_tasks():
                     audio_paths=params.get("audio_paths", []),
                     prompt=task["prompt"] or "",
                     duration=params.get("duration", 5),
-                    ratio=params.get("ratio", "16:9"),
+                    ratio=params.get("ratio", "9:16"),
                     model_version=params.get("model_version", "seedance2.0fast"),
                 )
                 now = datetime.now(timezone.utc).isoformat()

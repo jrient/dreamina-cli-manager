@@ -13,6 +13,7 @@ from fastapi.responses import Response
 from config import ACCOUNTS_DIR, UPLOAD_DIR, DB_PATH
 from models import TaskResponse
 from services.dreamina import submit_multimodal2video, ConcurrencyLimitError, ACCOUNT_HOME_BASE, is_account_logged_in
+from services.poller import dispatch_queued_tasks
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -43,7 +44,7 @@ async def create_task(
     account_id: str = Form(...),
     prompt: str = Form(""),
     duration: int = Form(5),
-    ratio: str = Form("16:9"),
+    ratio: str = Form("9:16"),
     model_version: str = Form("seedance2.0fast"),
     project_id: Optional[str] = Form(None),
     label: Optional[str] = Form(None),
@@ -136,8 +137,8 @@ async def create_task(
         )
         task_status = "pending"
     except ConcurrencyLimitError:
-        # Task queued, will be submitted later
-        pass
+        # Task queued, will be submitted by background dispatcher
+        asyncio.get_event_loop().call_later(1, lambda: asyncio.ensure_future(dispatch_queued_tasks()))
     except Exception as e:
         # Real error, clean up and fail
         shutil.rmtree(task_dir, ignore_errors=True)
@@ -180,6 +181,31 @@ async def list_tasks(status: Optional[str] = None, account_id: Optional[str] = N
     return [_row_to_task(r) for r in rows]
 
 
+@router.get("/counts")
+async def get_task_counts():
+    """返回各账号的生成中（pending+processing）和排队中（queued）任务数"""
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT account_id, status, COUNT(*) as cnt FROM tasks "
+            "WHERE status IN ('pending', 'processing', 'queued') "
+            "GROUP BY account_id, status"
+        )
+        rows = await cursor.fetchall()
+
+    counts: dict = {}
+    for row in rows:
+        aid = row["account_id"]
+        if aid not in counts:
+            counts[aid] = {"active": 0, "queued": 0}
+        if row["status"] in ("pending", "processing"):
+            counts[aid]["active"] += row["cnt"]
+        else:
+            counts[aid]["queued"] += row["cnt"]
+
+    return counts
+
+
 @router.get("/{task_id}", response_model=TaskResponse)
 async def get_task(task_id: str):
     async with aiosqlite.connect(str(DB_PATH)) as db:
@@ -194,9 +220,13 @@ async def get_task(task_id: str):
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_task(task_id: str):
     async with aiosqlite.connect(str(DB_PATH)) as db:
-        cursor = await db.execute("SELECT id FROM tasks WHERE id=?", (task_id,))
-        if not await cursor.fetchone():
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT id, status FROM tasks WHERE id=?", (task_id,))
+        row = await cursor.fetchone()
+        if not row:
             raise HTTPException(404, "Task not found")
+        if row["status"] in ("pending", "processing", "success"):
+            raise HTTPException(400, "生成中或已完成的任务不允许删除")
         await db.execute("DELETE FROM tasks WHERE id=?", (task_id,))
         await db.commit()
 

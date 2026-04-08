@@ -17,7 +17,7 @@
     <!-- 左右分栏 -->
     <div class="split-layout">
       <div class="left-panel">
-        <SubmitTask :project-id="projectId" @submitted="loadTasks" />
+        <SubmitTask ref="submitTaskRef" :project-id="projectId" @submitted="loadTasks" />
       </div>
       <div class="right-panel">
         <!-- 任务列表头部 -->
@@ -121,11 +121,12 @@ const tasks = ref([])
 const loading = ref(false)
 const activeStatus = ref('')
 let refreshTimer = null
+const submitTaskRef = ref(null)
 
 const statusOptions = [
   { label: '全部', value: '' },
   { label: '排队中', value: 'queued' },
-  { label: '等待中', value: 'pending' },
+  { label: '已提交', value: 'pending' },
   { label: '生成中', value: 'processing' },
   { label: '已完成', value: 'success' },
   { label: '失败', value: 'failed' },
@@ -146,7 +147,7 @@ const statusType = (s) => {
 }
 
 const statusLabel = (s) => {
-  return { queued: '排队中', pending: '等待中', processing: '生成中', success: '已完成', failed: '失败' }[s] || s
+  return { queued: '排队中', pending: '已提交', processing: '生成中', success: '已完成', failed: '失败' }[s] || s
 }
 
 const formatParams = (paramsStr) => {
@@ -178,12 +179,10 @@ const loadTasks = async () => {
 }
 
 const copyTask = async (task) => {
-  try {
-    const newTask = await api.copyTask(task.id)
-    ElMessage.success('任务复制成功: ' + newTask.id)
-    loadTasks()
-  } catch (e) {
-    ElMessage.error('复制失败: ' + e.message)
+  if (submitTaskRef.value) {
+    await submitTaskRef.value.fillForm(task)
+    // 滚动到表单
+    document.querySelector('.left-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 }
 

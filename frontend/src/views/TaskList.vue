@@ -111,7 +111,7 @@ const activeAccount = ref('')
 const statusOptions = [
   { label: '全部', value: '' },
   { label: '排队中', value: 'queued' },
-  { label: '等待中', value: 'pending' },
+  { label: '已提交', value: 'pending' },
   { label: '生成中', value: 'processing' },
   { label: '已完成', value: 'success' },
   { label: '失败', value: 'failed' },
@@ -170,7 +170,7 @@ function statusType(s) {
 }
 
 function statusLabel(s) {
-  return { queued: '排队中', pending: '等待中', processing: '生成中', success: '已完成', failed: '失败' }[s] || s
+  return { queued: '排队中', pending: '已提交', processing: '生成中', success: '已完成', failed: '失败' }[s] || s
 }
 
 function formatDate(iso) {
