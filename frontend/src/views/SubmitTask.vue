@@ -269,10 +269,25 @@ function handleEditorInput() {
   const range = selection.getRangeAt(0)
   const node = range.startContainer
 
+  let atNode = null
+  let atOffset = -1
+
   if (node.nodeType === Node.TEXT_NODE && node.textContent[range.startOffset - 1] === '@') {
+    atNode = node
+    atOffset = range.startOffset - 1
+  } else if (node.nodeType === Node.ELEMENT_NODE) {
+    // Empty editor or caret at element boundary
+    const prev = node.childNodes[range.startOffset - 1]
+    if (prev && prev.nodeType === Node.TEXT_NODE && prev.textContent.slice(-1) === '@') {
+      atNode = prev
+      atOffset = prev.textContent.length - 1
+    }
+  }
+
+  if (atNode !== null) {
     const atRange = range.cloneRange()
-    atRange.setStart(node, range.startOffset - 1)
-    atRange.setEnd(node, range.startOffset)
+    atRange.setStart(atNode, atOffset)
+    atRange.setEnd(atNode, atOffset + 1)
     savedRange.value = atRange
     showMentionPopup.value = true
   } else {
@@ -285,7 +300,8 @@ function getPromptText() {
   const editor = promptEditor.value
   if (!editor) return ''
   let text = ''
-  function walk(node) {
+  let isFirst = true
+  function walk(node, isTopLevel) {
     if (node.nodeType === Node.TEXT_NODE) {
       text += node.textContent
     } else if (node.nodeType === Node.ELEMENT_NODE) {
@@ -296,12 +312,16 @@ function getPromptText() {
         text += `@${label}${index}`
       } else if (node.tagName === 'BR') {
         text += '\n'
+      } else if (isTopLevel && (node.tagName === 'DIV' || node.tagName === 'P')) {
+        if (!isFirst) text += '\n'
+        isFirst = false
+        node.childNodes.forEach(child => walk(child, false))
       } else {
-        node.childNodes.forEach(walk)
+        node.childNodes.forEach(child => walk(child, false))
       }
     }
   }
-  editor.childNodes.forEach(walk)
+  editor.childNodes.forEach(node => walk(node, true))
   return text.trim()
 }
 
@@ -334,6 +354,7 @@ async function submit() {
   try {
     const task = await api.submitTask(fd)
     ElMessage.success(`任务已提交，ID: ${task.id}`)
+    form.value.images.forEach(f => { if (f.preview) URL.revokeObjectURL(f.preview) })
     form.value.images = []
     form.value.audios = []
     form.value.videos = []
