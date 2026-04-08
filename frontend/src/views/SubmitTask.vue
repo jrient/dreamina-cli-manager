@@ -89,7 +89,7 @@
               v-for="(img, i) in form.images"
               :key="i"
               class="mention-item"
-              @click="insertMention('图片', i + 1)"
+              @mousedown.prevent="insertMention('image', i + 1, img.preview)"
             >
               <div class="mention-thumb">
                 <img v-if="img.preview" :src="img.preview" class="mention-thumb-img" />
@@ -104,7 +104,7 @@
               v-for="(aud, i) in form.audios"
               :key="i"
               class="mention-item"
-              @click="insertMention('音频', i + 1)"
+              @mousedown.prevent="insertMention('audio', i + 1, null)"
             >
               <span>🎵 音频{{ i + 1 }} <span class="filename">{{ aud.name }}</span></span>
             </div>
@@ -115,7 +115,7 @@
               v-for="(vid, i) in form.videos"
               :key="i"
               class="mention-item"
-              @click="insertMention('视频', i + 1)"
+              @mousedown.prevent="insertMention('video', i + 1, null)"
             >
               <span>🎬 视频{{ i + 1 }} <span class="filename">{{ vid.name }}</span></span>
             </div>
@@ -325,10 +325,49 @@ function getPromptText() {
   return text.trim()
 }
 
-function insertMention(type, index) {
-  const mention = `@${type}${index}`
-  form.value.prompt = form.value.prompt.slice(0, -1) + mention + ' '
+function insertRefSpan(type, index, thumbnailUrl) {
+  // Restore the saved @ range
+  const selection = window.getSelection()
+  if (savedRange.value) {
+    selection.removeAllRanges()
+    selection.addRange(savedRange.value)
+  }
+
+  const range = selection.getRangeAt(0)
+  range.deleteContents() // delete the @ character
+
+  // Create the inline placeholder span
+  const span = document.createElement('span')
+  span.contentEditable = 'false'
+  span.dataset.refType = type
+  span.dataset.refIndex = String(index)
+  span.className = 'prompt-ref'
+
+  if (thumbnailUrl && type === 'image') {
+    const img = document.createElement('img')
+    img.src = thumbnailUrl
+    span.appendChild(img)
+  } else {
+    span.classList.add('prompt-ref-icon')
+    span.textContent = type === 'audio' ? '🎵' : type === 'video' ? '🎬' : '🖼'
+  }
+
+  range.insertNode(span)
+
+  // Move cursor to after the span
+  const after = document.createRange()
+  after.setStartAfter(span)
+  after.collapse(true)
+  selection.removeAllRanges()
+  selection.addRange(after)
+
+  promptEditor.value.focus()
+  savedRange.value = null
   showMentionPopup.value = false
+}
+
+function insertMention(type, index, thumbnail) {
+  insertRefSpan(type, index, thumbnail || null)
 }
 
 async function submit() {
