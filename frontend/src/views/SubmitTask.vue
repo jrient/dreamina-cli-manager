@@ -84,10 +84,10 @@
         <!-- @ 浮层 -->
         <div v-if="showMentionPopup" class="mention-popup">
           <!-- 项目素材 -->
-          <div v-if="projectMaterials.length" class="mention-group">
+          <div v-if="filteredProjectMaterials.length" class="mention-group">
             <div class="group-title">项目素材</div>
             <div
-              v-for="m in projectMaterials"
+              v-for="m in filteredProjectMaterials"
               :key="'mat-'+m.id"
               class="mention-item"
               @mousedown.prevent="insertMentionMaterial(m)"
@@ -120,9 +120,9 @@
             </div>
           </div>
           <!-- 空状态 -->
-          <div v-if="!projectMaterials.length && !form.images.length && !form.audios.length && !form.videos.length"
+          <div v-if="!filteredProjectMaterials.length && !form.images.length && !form.audios.length && !form.videos.length"
                class="mention-empty">
-            暂无可引用素材
+            {{ mentionFilter ? '无匹配素材' : '暂无可引用素材' }}
           </div>
         </div>
       </div>
@@ -245,13 +245,21 @@ const promptEditor = ref(null)
 const promptContainer = ref(null)
 const showMentionPopup = ref(false)
 const savedRange = ref(null)
+const mentionFilter = ref('') // Filter text after @
 
 function getMaterialUrl(filePath) {
   return '/uploads/materials/' + filePath.split('/').pop()
 }
 
+// Filtered materials based on @ filter text
+const filteredProjectMaterials = computed(() => {
+  if (!mentionFilter.value) return projectMaterials.value
+  return projectMaterials.value.filter(m => m.name.toLowerCase().includes(mentionFilter.value))
+})
+
 onClickOutside(promptContainer, () => {
   showMentionPopup.value = false
+  mentionFilter.value = ''
 })
 
 function triggerUpload(type) {
@@ -290,30 +298,51 @@ function handleEditorInput() {
   const range = selection.getRangeAt(0)
   const node = range.startContainer
 
+  // Find @ symbol and extract filter text after it
   let atNode = null
   let atOffset = -1
+  let filterText = ''
 
-  if (node.nodeType === Node.TEXT_NODE && node.textContent[range.startOffset - 1] === '@') {
-    atNode = node
-    atOffset = range.startOffset - 1
+  if (node.nodeType === Node.TEXT_NODE) {
+    const text = node.textContent
+    const offset = range.startOffset
+    // Check if there's @ before cursor
+    const beforeCursor = text.slice(0, offset)
+    const atIndex = beforeCursor.lastIndexOf('@')
+    if (atIndex !== -1) {
+      // Check if @ is not part of another word (preceded by space or at start)
+      const charBefore = atIndex > 0 ? beforeCursor[atIndex - 1] : ' '
+      if (charBefore === ' ' || charBefore === '\n' || atIndex === 0) {
+        atNode = node
+        atOffset = atIndex
+        filterText = beforeCursor.slice(atIndex + 1).toLowerCase()
+      }
+    }
   } else if (node.nodeType === Node.ELEMENT_NODE) {
     // Empty editor or caret at element boundary
     const prev = node.childNodes[range.startOffset - 1]
-    if (prev && prev.nodeType === Node.TEXT_NODE && prev.textContent.slice(-1) === '@') {
-      atNode = prev
-      atOffset = prev.textContent.length - 1
+    if (prev && prev.nodeType === Node.TEXT_NODE) {
+      const text = prev.textContent
+      const atIndex = text.lastIndexOf('@')
+      if (atIndex !== -1) {
+        atNode = prev
+        atOffset = atIndex
+        filterText = text.slice(atIndex + 1).toLowerCase()
+      }
     }
   }
 
   if (atNode !== null) {
     const atRange = range.cloneRange()
     atRange.setStart(atNode, atOffset)
-    atRange.setEnd(atNode, atOffset + 1)
+    atRange.setEnd(atNode, atOffset + 1 + filterText.length)
     savedRange.value = atRange
+    mentionFilter.value = filterText
     showMentionPopup.value = true
   } else {
     showMentionPopup.value = false
     savedRange.value = null
+    mentionFilter.value = ''
   }
 }
 
@@ -391,14 +420,17 @@ function insertRefSpan(type, index, thumbnailUrl) {
   promptEditor.value.focus()
   savedRange.value = null
   showMentionPopup.value = false
+  mentionFilter.value = ''
 }
 
 function insertMention(type, index, thumbnail) {
+  mentionFilter.value = ''
   insertRefSpan(type, index, thumbnail || null)
 }
 
 async function insertMentionMaterial(material) {
   showMentionPopup.value = false
+  mentionFilter.value = ''
 
   // Already referenced — reuse existing position
   if (materialMap.value[material.id]) {
@@ -440,6 +472,7 @@ async function insertMentionMaterial(material) {
 }
 
 function insertMentionUpload(type, index, thumbnail) {
+  mentionFilter.value = ''
   insertRefSpan(type, index, thumbnail)
 }
 
