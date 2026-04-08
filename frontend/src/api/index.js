@@ -1,24 +1,39 @@
 // frontend/src/api/index.js
 const BASE = '/api'
+const DEFAULT_TIMEOUT = 30000 // 30 秒默认超时
 
-async function request(method, path, { body, params } = {}) {
+async function request(method, path, { body, params, timeout = DEFAULT_TIMEOUT } = {}) {
   let url = BASE + path
   if (params) {
     const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null))
     if (qs.toString()) url += '?' + qs
   }
-  const resp = await fetch(url, {
-    method,
-    body,
-    // Don't set Content-Type for FormData (browser sets it with boundary)
-    ...(body instanceof FormData ? {} : { headers: { 'Content-Type': 'application/json' } }),
-  })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ detail: resp.statusText }))
-    throw new Error(err.detail || resp.statusText)
+
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeout)
+
+  try {
+    const resp = await fetch(url, {
+      method,
+      body,
+      signal: controller.signal,
+      // Don't set Content-Type for FormData (browser sets it with boundary)
+      ...(body instanceof FormData ? {} : { headers: { 'Content-Type': 'application/json' } }),
+    })
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }))
+      throw new Error(err.detail || resp.statusText)
+    }
+    if (resp.status === 204) return null
+    return resp.json()
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      throw new Error('请求超时，请检查网络连接')
+    }
+    throw e
+  } finally {
+    clearTimeout(timeoutId)
   }
-  if (resp.status === 204) return null
-  return resp.json()
 }
 
 export const api = {
