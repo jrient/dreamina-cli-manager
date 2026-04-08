@@ -45,45 +45,50 @@
       :data-status="task.status"
       shadow="hover"
     >
+      <!-- 第一行：账号、标签、时间、操作 -->
       <div class="task-header">
-        <el-tag :type="statusType(task.status)">{{ statusLabel(task.status) }}</el-tag>
-        <span class="task-meta">{{ task.account_id }} · {{ formatDate(task.created_at) }}</span>
+        <span class="task-account">{{ task.account_id }}</span>
+        <el-tag v-if="task.label" size="small" type="warning" effect="plain">{{ task.label }}</el-tag>
+        <span class="task-time">
+          {{ formatDate(task.created_at) }}
+          <template v-if="task.status === 'success' || task.status === 'failed'">
+            → {{ formatDate(task.updated_at) }}
+          </template>
+        </span>
         <el-button type="danger" text @click="deleteTask(task.id)">
           <el-icon><Delete /></el-icon>
         </el-button>
       </div>
 
-      <div class="task-params" v-if="task.params">
-        <el-text type="info" size="small">
-          {{ formatParams(task.params) }}
-        </el-text>
-      </div>
-
+      <!-- 第二行：提示词 -->
       <div v-if="task.prompt" class="task-prompt">
         <el-text size="small">{{ task.prompt }}</el-text>
       </div>
 
-      <div v-if="task.status === 'success' && task.result_url" class="task-result">
-        <el-link :href="task.result_url" target="_blank" type="success">
+      <!-- 第三行：参数 + 下载 -->
+      <div class="task-params-row">
+        <el-text v-if="task.params" type="info" size="small">{{ formatParams(task.params) }}</el-text>
+        <el-link v-if="task.status === 'success' && task.result_url" :href="task.result_url" target="_blank" type="success" size="small">
           <el-icon><Download /></el-icon> 下载视频
         </el-link>
       </div>
 
-      <div v-if="task.status === 'failed'" class="task-error">
-        <el-text type="danger" size="small">{{ task.error_msg || '任务失败，原因未知' }}</el-text>
-        <el-alert
-          v-if="task.error_msg && task.error_msg.includes('ComplianceConfirmation')"
-          title="请先在 Dreamina Web 端完成合规授权后重试"
-          type="warning"
-          show-icon
-          :closable="false"
-          style="margin-top: 8px"
-        />
-      </div>
-
-      <div class="task-id">
+      <!-- 第四行：ID、状态、错误 -->
+      <div class="task-footer">
         <el-text type="info" size="small">ID: {{ task.id }}</el-text>
+        <el-tag :type="statusType(task.status)" size="small">{{ statusLabel(task.status) }}</el-tag>
+        <el-text v-if="task.status === 'failed'" type="danger" size="small" class="task-error-inline">
+          {{ task.error_msg || '任务失败，原因未知' }}
+        </el-text>
       </div>
+      <el-alert
+        v-if="task.status === 'failed' && task.error_msg && task.error_msg.includes('ComplianceConfirmation')"
+        title="请先在 Dreamina Web 端完成合规授权后重试"
+        type="warning"
+        show-icon
+        :closable="false"
+        style="margin-top: 6px"
+      />
     </el-card>
   </div>
 </template>
@@ -222,11 +227,12 @@ function formatParams(paramsStr) {
 .task-card[data-status="pending"] { border-left-color: #909399; }
 .task-card[data-status="queued"] { border-left-color: #c0c4cc; }
 
-.task-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.task-meta { flex: 1; color: #909399; font-size: 13px; }
-.task-params { margin-bottom: 4px; }
-.task-prompt { margin: 6px 0; }
-.task-result { margin-top: 10px; }
-.task-error { margin-top: 8px; }
-.task-id { margin-top: 8px; }
+.task-card :deep(.el-card__body) { padding: 12px 16px; }
+.task-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.task-account { font-size: 13px; font-weight: 500; color: #303133; }
+.task-time { flex: 1; font-size: 12px; color: #909399; }
+.task-prompt { margin: 4px 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-params-row { display: flex; align-items: center; gap: 12px; margin: 4px 0; }
+.task-footer { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.task-error-inline { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
