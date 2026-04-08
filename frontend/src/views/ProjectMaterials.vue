@@ -34,7 +34,7 @@
       </div>
       <div class="material-grid" v-if="images.length">
         <el-card v-for="material in images" :key="material.id" class="material-card" shadow="hover">
-          <el-image :src="getFileUrl(material.file_path)" fit="cover" class="material-thumb" />
+          <el-image :src="getFileUrl(material.file_path)" fit="contain" class="material-thumb" />
           <div class="material-info">
             <span class="material-name">{{ material.name }}</span>
             <el-dropdown trigger="click">
@@ -291,7 +291,8 @@ onMounted(() => {
 }
 .material-thumb {
   width: 100%;
-  height: 120px;
+  height: auto;
+  max-height: 200px;
 }
 .material-info {
   display: flex;

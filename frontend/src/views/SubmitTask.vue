@@ -217,6 +217,10 @@ const hoverCard = ref('')
 
 const showProjectFields = computed(() => props.projectId)
 
+// Project materials state - must be defined before the watch that uses it
+const projectMaterials = ref([])
+const materialMap = ref({}) // { materialId: { type: 'image'|'audio', index: N } }
+
 watch(() => props.projectId, async (val) => {
   form.value.project_id = val
   if (val) {
@@ -241,9 +245,6 @@ const promptEditor = ref(null)
 const promptContainer = ref(null)
 const showMentionPopup = ref(false)
 const savedRange = ref(null)
-
-const projectMaterials = ref([])
-const materialMap = ref({}) // { materialId: { type: 'image'|'audio', index: N } }
 
 function getMaterialUrl(filePath) {
   return '/uploads/materials/' + filePath.split('/').pop()
@@ -672,26 +673,28 @@ onMounted(() => {
   color: #c0c4cc;
   pointer-events: none;
 }
-.prompt-ref {
+
+/* Use :deep() for dynamically inserted elements in contenteditable */
+:deep(.prompt-ref) {
   display: inline-flex;
   align-items: center;
-  vertical-align: middle;
-  border-radius: 4px;
+  vertical-align: text-bottom;
+  border-radius: 3px;
   overflow: hidden;
   margin: 0 2px;
   background: #f0f7ff;
   border: 1px solid #d0e8ff;
-  padding: 1px;
   user-select: none;
+  height: 16px;
+  line-height: 1;
 }
-.prompt-ref img {
-  width: 22px;
-  height: 22px;
+:deep(.prompt-ref img) {
+  width: 16px;
+  height: 16px;
   object-fit: cover;
   display: block;
-  border-radius: 3px;
 }
-.prompt-ref-icon {
+:deep(.prompt-ref-icon) {
   padding: 2px 4px;
   font-size: 14px;
   line-height: 1;
