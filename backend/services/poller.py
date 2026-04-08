@@ -63,12 +63,15 @@ async def poll_tasks():
             )
             rows = await cursor.fetchall()
 
-        for row in rows:
+        now = datetime.now(timezone.utc)
+
+        async def process_task(row):
+            """Process a single task, returns True if should skip further processing."""
             task_id = row["id"]
             submit_id = row["submit_id"]
             account_id = row["account_id"]
-            # 超时检查优先（包括 submit_id 为空的损坏任务）
-            now = datetime.now(timezone.utc)
+
+            # 超时检查优先
             try:
                 updated_at = datetime.fromisoformat(row["updated_at"].replace("Z", "+00:00"))
                 if updated_at.tzinfo is None:
@@ -82,12 +85,12 @@ async def poll_tasks():
                         )
                         await db.commit()
                     logger.warning(f"Task {task_id} timed out after {age_hours:.1f}h")
-                    continue
+                    return True
             except Exception:
                 pass
 
             if not submit_id:
-                continue  # 无 submit_id 且未超时，跳过
+                return True  # 无 submit_id 且未超时，跳过
 
             try:
                 result = await query_result(account_id=account_id, submit_id=submit_id)
@@ -100,13 +103,11 @@ async def poll_tasks():
 
                 # 更新数据库：优先使用本地路径（转为 web URL）
                 if local_path:
-                    # local_path 是容器内路径如 /app/results/<task_id>/result.mp4
-                    # 转为 web URL: /results/<task_id>/result.mp4
-                    import os
                     rel_path = local_path.replace("/app/results/", "/results/")
                     final_url = rel_path
                 else:
                     final_url = result["result_url"]
+
                 async with aiosqlite.connect(str(DB_PATH)) as db:
                     await db.execute(
                         "UPDATE tasks SET status=?, result_url=?, error_msg=?, updated_at=? WHERE id=?",
@@ -116,6 +117,17 @@ async def poll_tasks():
                 logger.info(f"Task {task_id}: {result['status']}" + (f" (downloaded)" if local_path else ""))
             except Exception as e:
                 logger.warning(f"Poll failed for task {task_id}: {e}")
+            return False
+
+        # 并发处理所有任务（最多 10 个并发）
+        semaphore = asyncio.Semaphore(10)
+
+        async def process_with_limit(row):
+            async with semaphore:
+                await process_task(row)
+
+        if rows:
+            await asyncio.gather(*[process_with_limit(row) for row in rows])
 
         # 调度 queued 任务
         await dispatch_queued_tasks()

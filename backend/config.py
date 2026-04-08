@@ -8,7 +8,7 @@ DB_PATH = Path(os.getenv("DB_PATH", "/app/db/tasks.db"))
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
 RESULTS_DIR = Path(os.getenv("RESULTS_DIR", "/app/results"))
 MATERIALS_DIR = UPLOAD_DIR / "materials"
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "600"))
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "60"))
 
 # Ensure runtime directories exist
 CONFIG_BASE.mkdir(parents=True, exist_ok=True)
