@@ -73,15 +73,14 @@
         <span class="section-hint">（可选，输入@引用媒体）</span>
       </div>
       <div class="prompt-container" ref="promptContainer">
-        <el-input
-          ref="promptInput"
-          v-model="form.prompt"
-          type="textarea"
-          :rows="3"
-          placeholder="描述你想要生成的视频内容..."
-          @input="handlePromptInput"
+        <div
+          ref="promptEditor"
+          contenteditable="true"
+          class="prompt-editor"
+          data-placeholder="描述你想要生成的视频内容..."
+          @input="handleEditorInput"
           @keydown.esc="showMentionPopup = false"
-        />
+        ></div>
         <!-- @ 浮层 -->
         <div v-if="showMentionPopup" class="mention-popup">
           <div v-if="form.images.length" class="mention-group">
@@ -225,9 +224,10 @@ const hasFiles = computed(() => {
 const imageInput = ref(null)
 const audioInput = ref(null)
 const videoInput = ref(null)
-const promptInput = ref(null)
+const promptEditor = ref(null)
 const promptContainer = ref(null)
 const showMentionPopup = ref(false)
+const savedRange = ref(null)
 
 onClickOutside(promptContainer, () => {
   showMentionPopup.value = false
@@ -262,15 +262,47 @@ function removeFile(type, index) {
   form.value[type].splice(index, 1)
 }
 
-function handlePromptInput(value) {
-  const lastChar = value.slice(-1)
-  if (lastChar === '@') {
-    if (form.value.images.length || form.value.audios.length || form.value.videos.length) {
-      showMentionPopup.value = true
-    }
+function handleEditorInput() {
+  const selection = window.getSelection()
+  if (!selection.rangeCount) return
+
+  const range = selection.getRangeAt(0)
+  const node = range.startContainer
+
+  if (node.nodeType === Node.TEXT_NODE && node.textContent[range.startOffset - 1] === '@') {
+    const atRange = range.cloneRange()
+    atRange.setStart(node, range.startOffset - 1)
+    atRange.setEnd(node, range.startOffset)
+    savedRange.value = atRange
+    showMentionPopup.value = true
   } else {
     showMentionPopup.value = false
+    savedRange.value = null
   }
+}
+
+function getPromptText() {
+  const editor = promptEditor.value
+  if (!editor) return ''
+  let text = ''
+  function walk(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      text += node.textContent
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      const type = node.dataset?.refType
+      if (type) {
+        const index = node.dataset.refIndex
+        const label = { image: '图片', audio: '音频', video: '视频' }[type] || type
+        text += `@${label}${index}`
+      } else if (node.tagName === 'BR') {
+        text += '\n'
+      } else {
+        node.childNodes.forEach(walk)
+      }
+    }
+  }
+  editor.childNodes.forEach(walk)
+  return text.trim()
 }
 
 function insertMention(type, index) {
@@ -287,7 +319,7 @@ async function submit() {
 
   const fd = new FormData()
   fd.append('account_id', accountId.value)
-  fd.append('prompt', form.value.prompt)
+  fd.append('prompt', getPromptText())
   fd.append('duration', form.value.duration)
   fd.append('ratio', form.value.ratio)
   fd.append('model_version', form.value.model_version)
@@ -305,7 +337,7 @@ async function submit() {
     form.value.images = []
     form.value.audios = []
     form.value.videos = []
-    form.value.prompt = ''
+    if (promptEditor.value) promptEditor.value.innerHTML = ''
     form.value.label = ''
     emit('submitted')
   } catch (e) {
@@ -485,17 +517,51 @@ onMounted(() => {
   margin-bottom: 16px;
 }
 
-.prompt-container :deep(.el-textarea__inner) {
-  background: #fafafa;
-  border-radius: 10px;
-  border: 1px solid #e4e7ed;
+.prompt-editor {
+  min-height: 72px;
   padding: 12px;
+  border: 1px solid #e4e7ed;
+  border-radius: 10px;
+  background: #fafafa;
   font-size: 13px;
+  line-height: 1.6;
+  outline: none;
+  word-break: break-word;
+  white-space: pre-wrap;
+  cursor: text;
 }
-
-.prompt-container :deep(.el-textarea__inner:focus) {
+.prompt-editor:focus {
   border-color: #409eff;
   background: #fff;
+}
+.prompt-editor:empty::before {
+  content: attr(data-placeholder);
+  color: #c0c4cc;
+  pointer-events: none;
+}
+.prompt-ref {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 0 2px;
+  background: #f0f7ff;
+  border: 1px solid #d0e8ff;
+  padding: 1px;
+  user-select: none;
+}
+.prompt-ref img {
+  width: 22px;
+  height: 22px;
+  object-fit: cover;
+  display: block;
+  border-radius: 3px;
+}
+.prompt-ref-icon {
+  padding: 2px 4px;
+  font-size: 14px;
+  line-height: 1;
 }
 
 /* @ 浮层 */
