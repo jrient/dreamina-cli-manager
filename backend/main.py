@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from config import POLL_INTERVAL, RESULTS_DIR, UPLOAD_DIR
-from database import init_db
+from database import init_db, close_db
 from routers.accounts import router as accounts_router
 from routers.tasks import router as tasks_router
 from routers.projects import router as projects_router
@@ -28,6 +28,7 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     yield
     scheduler.shutdown()
+    await close_db()
 
 
 app = FastAPI(title="Dreamina Web UI", lifespan=lifespan)

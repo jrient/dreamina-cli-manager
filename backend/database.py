@@ -1,6 +1,12 @@
 # backend/database.py
 import aiosqlite
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
 from config import DB_PATH
+
+# 全局数据库连接
+_db_connection: aiosqlite.Connection | None = None
+
 
 CREATE_TASKS_SQL = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -52,9 +58,32 @@ ALTER TABLE tasks ADD COLUMN label TEXT;
 """
 
 async def get_db() -> aiosqlite.Connection:
+    """获取数据库连接（用于 FastAPI 依赖注入）"""
+    global _db_connection
+    if _db_connection is None:
+        _db_connection = await aiosqlite.connect(str(DB_PATH))
+        _db_connection.row_factory = aiosqlite.Row
+    return _db_connection
+
+
+@asynccontextmanager
+async def get_db_context() -> AsyncGenerator[aiosqlite.Connection, None]:
+    """数据库连接上下文管理器（用于非请求场景如 poller）"""
     db = await aiosqlite.connect(str(DB_PATH))
     db.row_factory = aiosqlite.Row
-    return db
+    try:
+        yield db
+    finally:
+        await db.close()
+
+
+async def close_db():
+    """关闭数据库连接"""
+    global _db_connection
+    if _db_connection is not None:
+        await _db_connection.close()
+        _db_connection = None
+
 
 async def init_db():
     async with aiosqlite.connect(str(DB_PATH)) as db:
