@@ -120,12 +120,26 @@ const statusOptions = [
 onMounted(async () => {
   await fetchTasks()
   await fetchAccounts()
-  refreshTimer = setInterval(fetchTasks, 10000)
+  scheduleRefresh()
 })
 
 onUnmounted(() => {
-  clearInterval(refreshTimer)
+  if (refreshTimer) {
+    clearTimeout(refreshTimer)
+  }
 })
+
+// 动态轮询：有活跃任务时 5 秒，否则 30 秒
+function scheduleRefresh() {
+  const activeCount = tasks.value.filter(t =>
+    ['queued', 'pending', 'processing'].includes(t.status)
+  ).length
+  const interval = activeCount > 0 ? 5000 : 30000
+  refreshTimer = setTimeout(async () => {
+    await fetchTasks()
+    scheduleRefresh()
+  }, interval)
+}
 
 // 监听筛选条件变化
 watch([activeStatus, activeAccount], () => {
