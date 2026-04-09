@@ -15,6 +15,7 @@ from config import ACCOUNTS_DIR, UPLOAD_DIR, DB_PATH
 from models import TaskResponse
 from services.dreamina import submit_multimodal2video, ConcurrencyLimitError, ACCOUNT_HOME_BASE, is_account_logged_in
 from services.poller import dispatch_queued_tasks
+from services.auth import get_session, get_user_by_id, can_user_use_account, get_user_project_role
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -37,7 +38,29 @@ def _row_to_task(row) -> TaskResponse:
         updated_at=row["updated_at"],
         project_id=row["project_id"] if "project_id" in row.keys() else None,
         label=row["label"] if "label" in row.keys() else None,
+        creator_id=row["creator_id"] if "creator_id" in row.keys() else None,
+        episode=row["episode"] if "episode" in row.keys() else None,
     )
+
+
+async def get_current_user_or_admin(session_id: str = None):
+    """获取当前用户，验证登录状态"""
+    if not session_id:
+        raise HTTPException(401, "未登录")
+
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(401, "登录已过期")
+
+    user = await get_user_by_id(session["user_id"])
+    if not user:
+        raise HTTPException(401, "用户不存在")
+
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "is_admin": bool(user["is_admin"])
+    }
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=TaskResponse)
@@ -49,10 +72,14 @@ async def create_task(
     model_version: str = Form("seedance2.0fast"),
     project_id: Optional[str] = Form(None),
     label: Optional[str] = Form(None),
+    episode: Optional[int] = Form(None),
     images: list[UploadFile] = File(default=[]),
     videos: list[UploadFile] = File(default=[]),
     audios: list[UploadFile] = File(default=[]),
+    session_id: str = None,
 ):
+    user = await get_current_user_or_admin(session_id)
+
     if not images and not videos:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -64,6 +91,28 @@ async def create_task(
         raise HTTPException(422, "Maximum 3 videos allowed")
     if len(audios) > 3:
         raise HTTPException(422, "Maximum 3 audio files allowed")
+
+    # 检查项目权限
+    if project_id:
+        role = await get_user_project_role(user["id"], project_id)
+        if not role and not user["is_admin"]:
+            raise HTTPException(403, "无权限访问此项目")
+
+        # 检查账号权限
+        if not user["is_admin"] and not await can_user_use_account(user["id"], project_id, account_id, False):
+            raise HTTPException(403, "您无权限使用该账号")
+
+        # 检查分集范围
+        if episode:
+            async with aiosqlite.connect(str(DB_PATH)) as db:
+                db.row_factory = aiosqlite.Row
+                cursor = await db.execute(
+                    "SELECT episode_count FROM projects WHERE id=?",
+                    (project_id,)
+                )
+                row = await cursor.fetchone()
+                if row and episode > row["episode_count"]:
+                    raise HTTPException(400, f"分集号超出范围，最大为 {row['episode_count']}")
 
     # Check account exists and is logged in
     if not is_account_logged_in(account_id):
@@ -127,8 +176,8 @@ async def create_task(
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         await db.execute(
-            "INSERT INTO tasks (id, account_id, status, submit_id, result_url, error_msg, prompt, params, created_at, updated_at, project_id, label) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (task_id, account_id, task_status, submit_id, None, None, prompt, params, now, now, project_id, label),
+            "INSERT INTO tasks (id, account_id, status, submit_id, result_url, error_msg, prompt, params, created_at, updated_at, project_id, label, creator_id, episode) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (task_id, account_id, task_status, submit_id, None, None, prompt, params, now, now, project_id, label, user["id"], episode),
         )
         await db.commit()
         cursor = await db.execute("SELECT * FROM tasks WHERE id=?", (task_id,))
@@ -138,9 +187,18 @@ async def create_task(
 
 
 @router.get("", response_model=list[TaskResponse])
-async def list_tasks(status: Optional[str] = None, account_id: Optional[str] = None, project_id: Optional[str] = None):
+async def list_tasks(
+    status: Optional[str] = None,
+    account_id: Optional[str] = None,
+    project_id: Optional[str] = None,
+    episode: Optional[int] = None,
+    session_id: str = None
+):
+    user = await get_current_user_or_admin(session_id)
+
     query = "SELECT * FROM tasks WHERE 1=1"
     params = []
+
     if status:
         query += " AND status=?"
         params.append(status)
@@ -150,6 +208,15 @@ async def list_tasks(status: Optional[str] = None, account_id: Optional[str] = N
     if project_id:
         query += " AND project_id=?"
         params.append(project_id)
+    if episode:
+        query += " AND episode=?"
+        params.append(episode)
+
+    # 非管理员只看自己的任务
+    if not user["is_admin"]:
+        query += " AND creator_id=?"
+        params.append(user["id"])
+
     query += " ORDER BY created_at DESC"
 
     async with aiosqlite.connect(str(DB_PATH)) as db:
