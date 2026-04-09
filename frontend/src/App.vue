@@ -6,12 +6,25 @@
         <span class="app-title">🎬 Dreamina 视频生成</span>
       </div>
       <div class="header-center">
-        <AccountSelector />
+        <AccountSelector v-if="authStore.isLoggedIn" />
       </div>
       <div class="header-right">
-        <el-button text @click="$router.push('/projects')">项目</el-button>
-        <el-button text @click="$router.push('/accounts')">账号管理</el-button>
-        <el-button text @click="$router.push('/admin')">Admin</el-button>
+        <template v-if="authStore.isLoggedIn">
+          <el-button text @click="$router.push('/projects')">项目</el-button>
+          <el-button text @click="$router.push('/accounts')">账号管理</el-button>
+          <el-button v-if="authStore.isAdmin" text @click="$router.push('/admin')">Admin</el-button>
+          <el-dropdown @command="handleCommand">
+            <span class="user-dropdown">
+              {{ authStore.user?.username }}
+              <el-icon><ArrowDown /></el-icon>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="logout">退出登录</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </template>
       </div>
     </el-header>
     <el-main class="app-main">
@@ -21,11 +34,28 @@
 </template>
 
 <script setup>
-import { ref, provide } from 'vue'
+import { ref, provide, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { ArrowDown } from '@element-plus/icons-vue'
 import AccountSelector from './components/AccountSelector.vue'
+import { useAuthStore } from './stores/auth'
+
+const router = useRouter()
+const authStore = useAuthStore()
 
 const selectedAccountId = ref('')
 provide('selectedAccountId', selectedAccountId)
+
+onMounted(async () => {
+  await authStore.fetchUser()
+})
+
+const handleCommand = (command) => {
+  if (command === 'logout') {
+    authStore.logout()
+    router.push('/login')
+  }
+}
 </script>
 
 <style>
@@ -47,6 +77,14 @@ body { margin: 0; }
 .header-right {
   display: flex;
   gap: 8px;
+  align-items: center;
+}
+.user-dropdown {
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 .app-main {
   padding: 0;
