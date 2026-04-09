@@ -12,6 +12,8 @@ from database import init_db, close_db
 from routers.accounts import router as accounts_router
 from routers.tasks import router as tasks_router
 from routers.projects import router as projects_router
+from routers.auth import router as auth_router
+from routers.users import router as users_router
 from services.poller import poll_tasks
 
 logging.basicConfig(level=logging.INFO)
@@ -40,6 +42,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
+app.include_router(users_router)
 app.include_router(accounts_router)
 app.include_router(tasks_router)
 app.include_router(projects_router)
