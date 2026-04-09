@@ -27,12 +27,18 @@
         <div class="nav-title">全局任务</div>
         <div class="nav-desc">查看所有任务，按项目筛选</div>
       </el-card>
+
+      <el-card class="nav-card" @click="$router.push('/admin/users')" shadow="hover">
+        <el-icon class="nav-icon"><UserFilled /></el-icon>
+        <div class="nav-title">用户管理</div>
+        <div class="nav-desc">管理系统用户，设置管理员权限</div>
+      </el-card>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ArrowLeft, FolderOpened, User, List } from '@element-plus/icons-vue'
+import { ArrowLeft, FolderOpened, User, List, UserFilled } from '@element-plus/icons-vue'
 </script>
 
 <style scoped>
