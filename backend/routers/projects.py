@@ -11,8 +11,10 @@ from fastapi.responses import Response
 from config import DB_PATH, MATERIALS_DIR
 from models import (
     ProjectCreate, ProjectUpdate, ProjectResponse, ProjectStats,
-    MaterialCreate, MaterialUpdate, MaterialResponse
+    MaterialCreate, MaterialUpdate, MaterialResponse,
+    MemberAdd, MemberResponse, AccountAssignment, ProjectSettingsUpdate
 )
+from services.auth import get_session, get_user_by_id
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -28,6 +30,8 @@ def _row_to_project(row) -> ProjectResponse:
         deleted_at=row["deleted_at"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        episode_count=row["episode_count"] if "episode_count" in row.keys() else 50,
+        creator_id=row["creator_id"] if "creator_id" in row.keys() else None,
     )
 
 
@@ -42,35 +46,98 @@ def _row_to_material(row) -> MaterialResponse:
     )
 
 
-# ==================== 项目 API ====================
+async def get_current_user_or_admin(session_id: str = None):
+    """获取当前用户，验证登录状态"""
+    if not session_id:
+        raise HTTPException(401, "未登录")
 
-@router.get("", response_model=list[ProjectResponse])
-async def list_projects(include_deleted: bool = False):
-    """获取活跃项目列表"""
-    query = "SELECT * FROM projects"
-    if not include_deleted:
-        query += " WHERE deleted_at IS NULL"
-    query += " ORDER BY updated_at DESC"
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(401, "登录已过期")
+
+    user = await get_user_by_id(session["user_id"])
+    if not user:
+        raise HTTPException(401, "用户不存在")
+
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "is_admin": bool(user["is_admin"])
+    }
+
+
+async def check_project_access(project_id: str, user: dict, require_owner: bool = False):
+    """检查项目访问权限"""
+    if user["is_admin"]:
+        return True
 
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute(query)
+        cursor = await db.execute(
+            "SELECT role FROM project_members WHERE project_id=? AND user_id=?",
+            (project_id, user["id"])
+        )
+        row = await cursor.fetchone()
+
+        if not row:
+            raise HTTPException(403, "无权限访问此项目")
+
+        if require_owner and row["role"] != "owner":
+            raise HTTPException(403, "需要项目拥有者权限")
+
+        return True
+
+
+# ==================== 项目 API ====================
+
+@router.get("", response_model=list[ProjectResponse])
+async def list_projects(include_deleted: bool = False, session_id: str = None):
+    """获取项目列表（根据用户权限过滤）"""
+    user = await get_current_user_or_admin(session_id)
+
+    query = "SELECT p.* FROM projects p"
+    params = []
+
+    if not user["is_admin"]:
+        # 非管理员只看参与的项目
+        query += " JOIN project_members pm ON p.id = pm.project_id WHERE pm.user_id=?"
+        params.append(user["id"])
+
+        if not include_deleted:
+            query += " AND p.deleted_at IS NULL"
+    else:
+        if not include_deleted:
+            query += " WHERE p.deleted_at IS NULL"
+
+    query += " ORDER BY p.updated_at DESC"
+
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(query, params)
         rows = await cursor.fetchall()
 
     return [_row_to_project(r) for r in rows]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=ProjectResponse)
-async def create_project(data: ProjectCreate):
+async def create_project(data: ProjectCreate, session_id: str = None):
     """创建项目"""
+    user = await get_current_user_or_admin(session_id)
+
     project_id = uuid.uuid4().hex[:12]
     now = _now()
 
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
+        # 创建项目
         await db.execute(
-            "INSERT INTO projects (id, name, deleted_at, created_at, updated_at) VALUES (?, ?, NULL, ?, ?)",
-            (project_id, data.name, now, now),
+            "INSERT INTO projects (id, name, deleted_at, created_at, updated_at, episode_count, creator_id) VALUES (?, ?, NULL, ?, ?, 50, ?)",
+            (project_id, data.name, now, now, user["id"]),
+        )
+        # 创建者成为项目拥有者
+        await db.execute(
+            "INSERT INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)",
+            (project_id, user["id"], now),
         )
         await db.commit()
         cursor = await db.execute("SELECT * FROM projects WHERE id=?", (project_id,))
@@ -80,8 +147,11 @@ async def create_project(data: ProjectCreate):
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
-async def get_project(project_id: str):
+async def get_project(project_id: str, session_id: str = None):
     """获取单个项目"""
+    user = await get_current_user_or_admin(session_id)
+    await check_project_access(project_id, user)
+
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute("SELECT * FROM projects WHERE id=?", (project_id,))
@@ -93,8 +163,11 @@ async def get_project(project_id: str):
 
 
 @router.put("/{project_id}", response_model=ProjectResponse)
-async def update_project(project_id: str, data: ProjectUpdate):
+async def update_project(project_id: str, data: ProjectUpdate, session_id: str = None):
     """更新项目名称"""
+    user = await get_current_user_or_admin(session_id)
+    await check_project_access(project_id, user, require_owner=True)
+
     now = _now()
 
     async with aiosqlite.connect(str(DB_PATH)) as db:
@@ -114,8 +187,11 @@ async def update_project(project_id: str, data: ProjectUpdate):
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_project(project_id: str, permanent: bool = False):
+async def delete_project(project_id: str, permanent: bool = False, session_id: str = None):
     """软删除或永久删除项目"""
+    user = await get_current_user_or_admin(session_id)
+    await check_project_access(project_id, user, require_owner=True)
+
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute("SELECT * FROM projects WHERE id=?", (project_id,))
@@ -146,8 +222,11 @@ async def delete_project(project_id: str, permanent: bool = False):
 
 
 @router.post("/{project_id}/restore", response_model=ProjectResponse)
-async def restore_project(project_id: str):
+async def restore_project(project_id: str, session_id: str = None):
     """恢复已删除的项目"""
+    user = await get_current_user_or_admin(session_id)
+    await check_project_access(project_id, user, require_owner=True)
+
     now = _now()
 
     async with aiosqlite.connect(str(DB_PATH)) as db:
@@ -171,8 +250,11 @@ async def restore_project(project_id: str):
 
 
 @router.get("/{project_id}/stats", response_model=ProjectStats)
-async def get_project_stats(project_id: str):
+async def get_project_stats(project_id: str, session_id: str = None):
     """获取项目统计"""
+    user = await get_current_user_or_admin(session_id)
+    await check_project_access(project_id, user)
+
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         # 检查项目存在
@@ -193,6 +275,231 @@ async def get_project_stats(project_id: str):
     return ProjectStats(task_count=task_count, material_count=material_count)
 
 
+# ==================== 成员管理 API ====================
+
+@router.get("/{project_id}/members", response_model=list[MemberResponse])
+async def list_project_members(project_id: str, session_id: str = None):
+    """获取项目成员列表"""
+    user = await get_current_user_or_admin(session_id)
+    await check_project_access(project_id, user)
+
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        # 获取成员列表
+        cursor = await db.execute(
+            """SELECT pm.user_id, pm.role, u.username, u.deleted_at
+               FROM project_members pm
+               JOIN users u ON pm.user_id = u.id
+               WHERE pm.project_id=?""",
+            (project_id,)
+        )
+        members = await cursor.fetchall()
+
+        result = []
+        for m in members:
+            # 获取成员可用账号
+            cursor = await db.execute(
+                "SELECT account_id FROM member_accounts WHERE project_id=? AND user_id=?",
+                (project_id, m["user_id"])
+            )
+            accounts = [r["account_id"] for r in await cursor.fetchall()]
+
+            username = m["username"]
+            if m["deleted_at"]:
+                username = f"{username} (已删除)"
+
+            result.append(MemberResponse(
+                user_id=m["user_id"],
+                username=username,
+                role=m["role"],
+                accounts=accounts
+            ))
+
+    return result
+
+
+@router.post("/{project_id}/members", status_code=status.HTTP_201_CREATED)
+async def add_project_member(project_id: str, data: MemberAdd, session_id: str = None):
+    """添加项目成员"""
+    user = await get_current_user_or_admin(session_id)
+    await check_project_access(project_id, user, require_owner=True)
+
+    # 检查用户是否存在
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT id FROM users WHERE id=? AND deleted_at IS NULL",
+            (data.user_id,)
+        )
+        if not await cursor.fetchone():
+            raise HTTPException(404, "用户不存在")
+
+        # 检查是否已是成员
+        cursor = await db.execute(
+            "SELECT 1 FROM project_members WHERE project_id=? AND user_id=?",
+            (project_id, data.user_id)
+        )
+        if await cursor.fetchone():
+            raise HTTPException(400, "该用户已是项目成员")
+
+        now = _now()
+        await db.execute(
+            "INSERT INTO project_members (project_id, user_id, role, created_at) VALUES (?, ?, ?, ?)",
+            (project_id, data.user_id, data.role, now)
+        )
+        await db.commit()
+
+    return {"message": "成员已添加"}
+
+
+@router.delete("/{project_id}/members/{user_id}")
+async def remove_project_member(project_id: str, user_id: str, session_id: str = None):
+    """移除项目成员"""
+    user = await get_current_user_or_admin(session_id)
+    await check_project_access(project_id, user, require_owner=True)
+
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        # 删除成员账号分配
+        await db.execute(
+            "DELETE FROM member_accounts WHERE project_id=? AND user_id=?",
+            (project_id, user_id)
+        )
+        # 删除成员关系
+        await db.execute(
+            "DELETE FROM project_members WHERE project_id=? AND user_id=?",
+            (project_id, user_id)
+        )
+        await db.commit()
+
+    return {"message": "成员已移除"}
+
+
+# ==================== 账号管理 API ====================
+
+@router.get("/{project_id}/accounts", response_model=list[str])
+async def get_project_accounts(project_id: str, session_id: str = None):
+    """获取项目账号池"""
+    user = await get_current_user_or_admin(session_id)
+    await check_project_access(project_id, user)
+
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT account_id FROM project_accounts WHERE project_id=?",
+            (project_id,)
+        )
+        rows = await cursor.fetchall()
+
+    return [r["account_id"] for r in rows]
+
+
+@router.put("/{project_id}/accounts")
+async def set_project_accounts(project_id: str, data: AccountAssignment, session_id: str = None):
+    """设置项目账号池"""
+    user = await get_current_user_or_admin(session_id)
+    await check_project_access(project_id, user, require_owner=True)
+
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        # 删除旧的
+        await db.execute("DELETE FROM project_accounts WHERE project_id=?", (project_id,))
+        # 删除受影响的成员账号分配
+        await db.execute("DELETE FROM member_accounts WHERE project_id=?", (project_id,))
+
+        # 添加新的
+        for account_id in data.accounts:
+            await db.execute(
+                "INSERT INTO project_accounts (project_id, account_id) VALUES (?, ?)",
+                (project_id, account_id)
+            )
+        await db.commit()
+
+    return {"message": "账号池已更新"}
+
+
+@router.get("/{project_id}/member-accounts/{user_id}", response_model=list[str])
+async def get_member_accounts(project_id: str, user_id: str, session_id: str = None):
+    """获取成员可用账号"""
+    user = await get_current_user_or_admin(session_id)
+    await check_project_access(project_id, user)
+
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT account_id FROM member_accounts WHERE project_id=? AND user_id=?",
+            (project_id, user_id)
+        )
+        rows = await cursor.fetchall()
+
+    return [r["account_id"] for r in rows]
+
+
+@router.put("/{project_id}/member-accounts/{user_id}")
+async def set_member_accounts(project_id: str, user_id: str, data: AccountAssignment, session_id: str = None):
+    """设置成员可用账号"""
+    user = await get_current_user_or_admin(session_id)
+    await check_project_access(project_id, user, require_owner=True)
+
+    # 验证账号都在项目账号池中
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT account_id FROM project_accounts WHERE project_id=?",
+            (project_id,)
+        )
+        project_accounts = {r["account_id"] for r in await cursor.fetchall()}
+
+        for account_id in data.accounts:
+            if account_id not in project_accounts:
+                raise HTTPException(400, f"账号 {account_id} 不在项目账号池中")
+
+        # 删除旧的
+        await db.execute(
+            "DELETE FROM member_accounts WHERE project_id=? AND user_id=?",
+            (project_id, user_id)
+        )
+
+        # 添加新的
+        for account_id in data.accounts:
+            await db.execute(
+                "INSERT INTO member_accounts (project_id, user_id, account_id) VALUES (?, ?, ?)",
+                (project_id, user_id, account_id)
+            )
+        await db.commit()
+
+    return {"message": "成员账号已更新"}
+
+
+# ==================== 项目设置 API ====================
+
+@router.put("/{project_id}/settings")
+async def update_project_settings(project_id: str, data: ProjectSettingsUpdate, session_id: str = None):
+    """更新项目设置"""
+    user = await get_current_user_or_admin(session_id)
+    await check_project_access(project_id, user, require_owner=True)
+
+    now = _now()
+
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        updates = ["updated_at=?"]
+        params = [now]
+
+        if data.episode_count is not None:
+            if data.episode_count < 1:
+                raise HTTPException(400, "集数必须大于0")
+            updates.append("episode_count=?")
+            params.append(data.episode_count)
+
+        params.append(project_id)
+
+        await db.execute(
+            f"UPDATE projects SET {', '.join(updates)} WHERE id=?",
+            params
+        )
+        await db.commit()
+
+    return {"message": "设置已更新"}
+
+
 # ==================== 素材 API ====================
 
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
@@ -200,8 +507,11 @@ ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".ogg", ".m4a", ".aac"}
 
 
 @router.get("/{project_id}/materials", response_model=list[MaterialResponse])
-async def list_materials(project_id: str, type: Optional[str] = None):
+async def list_materials(project_id: str, type: Optional[str] = None, session_id: str = None):
     """获取项目素材列表"""
+    user = await get_current_user_or_admin(session_id)
+    await check_project_access(project_id, user)
+
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         # 检查项目存在
@@ -228,8 +538,12 @@ async def create_material(
     name: str = Form(...),
     type: str = Form(...),
     file: UploadFile = File(...),
+    session_id: str = None,
 ):
     """上传素材"""
+    user = await get_current_user_or_admin(session_id)
+    await check_project_access(project_id, user)
+
     if type not in ("image", "audio"):
         raise HTTPException(400, "素材类型必须是 image 或 audio")
 
@@ -272,8 +586,11 @@ async def create_material(
 
 
 @router.put("/{project_id}/materials/{material_id}", response_model=MaterialResponse)
-async def update_material(project_id: str, material_id: str, data: MaterialUpdate):
+async def update_material(project_id: str, material_id: str, data: MaterialUpdate, session_id: str = None):
     """更新素材名称"""
+    user = await get_current_user_or_admin(session_id)
+    await check_project_access(project_id, user)
+
     now = _now()
 
     async with aiosqlite.connect(str(DB_PATH)) as db:
@@ -297,8 +614,11 @@ async def update_material(project_id: str, material_id: str, data: MaterialUpdat
 
 
 @router.delete("/{project_id}/materials/{material_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_material(project_id: str, material_id: str):
+async def delete_material(project_id: str, material_id: str, session_id: str = None):
     """删除素材"""
+    user = await get_current_user_or_admin(session_id)
+    await check_project_access(project_id, user)
+
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
