@@ -16,3 +16,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 MATERIALS_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+# Session 配置
+SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY", "dreamina-secret-key-change-in-production")
+SESSION_MAX_AGE = int(os.getenv("SESSION_MAX_AGE", "86400"))  # 24 hours
