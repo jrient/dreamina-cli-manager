@@ -172,3 +172,18 @@ async def init_db():
                 await db.commit()
             except aiosqlite.OperationalError:
                 pass
+
+        # 若无用户，创建默认管理员账号 admin/admin
+        cursor = await db.execute("SELECT COUNT(*) as count FROM users WHERE deleted_at IS NULL")
+        row = await cursor.fetchone()
+        if row[0] == 0:
+            import uuid, bcrypt
+            from datetime import datetime, timezone
+            user_id = uuid.uuid4().hex[:12]
+            hashed = bcrypt.hashpw(b"admin", bcrypt.gensalt()).decode()
+            now = datetime.now(timezone.utc).isoformat()
+            await db.execute(
+                "INSERT INTO users (id, username, password, is_admin, deleted_at, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, ?, ?)",
+                (user_id, "admin", hashed, 1, now, now)
+            )
+            await db.commit()
