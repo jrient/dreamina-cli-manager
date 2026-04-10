@@ -1,6 +1,6 @@
 # backend/routers/users.py
 import aiosqlite
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Cookie, HTTPException
 
 from config import DB_PATH
 from models import UserCreate, UserUpdate, UserResponse
@@ -39,9 +39,10 @@ async def require_admin(session_id: str):
 
 
 @router.get("", response_model=list[UserResponse])
-async def list_users(include_deleted: bool = False, session_id: str = None):
-    """获取用户列表（管理员）"""
-    await require_admin(session_id)
+async def list_users(include_deleted: bool = False, session_id: str = Cookie(None)):
+    """获取用户列表（登录用户可读，增删改仍需管理员）"""
+    if not session_id or not get_session(session_id):
+        raise HTTPException(401, "未登录")
 
     query = "SELECT * FROM users"
     if not include_deleted:
@@ -57,7 +58,7 @@ async def list_users(include_deleted: bool = False, session_id: str = None):
 
 
 @router.post("", response_model=UserResponse)
-async def create_new_user(data: UserCreate, session_id: str = None):
+async def create_new_user(data: UserCreate, session_id: str = Cookie(None)):
     """创建用户（管理员）"""
     await require_admin(session_id)
 
@@ -71,7 +72,7 @@ async def create_new_user(data: UserCreate, session_id: str = None):
 
 
 @router.put("/{user_id}", response_model=UserResponse)
-async def update_user_info(user_id: str, data: UserUpdate, session_id: str = None):
+async def update_user_info(user_id: str, data: UserUpdate, session_id: str = Cookie(None)):
     """更新用户（管理员）"""
     await require_admin(session_id)
 
@@ -87,7 +88,7 @@ async def update_user_info(user_id: str, data: UserUpdate, session_id: str = Non
 
 
 @router.delete("/{user_id}")
-async def delete_user(user_id: str, session_id: str = None):
+async def delete_user(user_id: str, session_id: str = Cookie(None)):
     """软删除用户（管理员）"""
     admin_session = await require_admin(session_id)
 

@@ -1,5 +1,5 @@
 # backend/routers/auth.py
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Cookie, HTTPException, Response
 from pydantic import BaseModel
 
 from models import LoginRequest, UserSession, UserResponse
@@ -62,7 +62,7 @@ async def login(req: LoginRequest, response: Response):
 
 
 @router.post("/logout")
-async def logout(response: Response, session_id: str = None):
+async def logout(response: Response, session_id: str = Cookie(None)):
     """用户登出"""
     if session_id:
         delete_session(session_id)
@@ -72,7 +72,7 @@ async def logout(response: Response, session_id: str = None):
 
 
 @router.get("/me", response_model=UserSession)
-async def get_current_user(session_id: str = None):
+async def get_current_user(session_id: str = Cookie(None)):
     """获取当前登录用户"""
     if not session_id:
         raise HTTPException(401, "未登录")

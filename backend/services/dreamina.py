@@ -103,10 +103,18 @@ async def ensure_account_initialized(account_id: str) -> None:
 
 async def get_credit(account_id: str) -> str:
     """Return credit balance string for account."""
+    import json
     await ensure_account_initialized(account_id)
     returncode, stdout, stderr = await run_cli(["user_credit"], account_id=account_id)
     if returncode != 0:
         raise RuntimeError(f"user_credit failed: {stderr or stdout}")
+    try:
+        data = json.loads(stdout)
+        if isinstance(data, dict) and "total_credit" in data:
+            return str(data["total_credit"])
+    except json.JSONDecodeError:
+        pass
+    # fallback to regex
     m = CREDIT_RE.search(stdout)
     return m.group(1) if m else stdout.strip()
 

@@ -140,6 +140,7 @@ async def soft_delete_user(user_id: str) -> bool:
     now = _now()
 
     async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
         # 检查是否有任务
         cursor = await db.execute(
             "SELECT COUNT(*) as count FROM tasks WHERE creator_id=?",
@@ -208,10 +209,11 @@ async def get_user_projects(user_id: str, is_admin: bool) -> list[str]:
 
 async def get_user_available_accounts(user_id: str, project_id: str, is_admin: bool) -> list[str]:
     """获取用户在某项目中可用的账号列表"""
-    if is_admin:
-        # 管理员可用项目账号池中的所有账号
-        async with aiosqlite.connect(str(DB_PATH)) as db:
-            db.row_factory = aiosqlite.Row
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+
+        # 管理员或 owner 可用项目账号池中的所有账号
+        if is_admin:
             cursor = await db.execute(
                 "SELECT account_id FROM project_accounts WHERE project_id=?",
                 (project_id,)
@@ -219,9 +221,21 @@ async def get_user_available_accounts(user_id: str, project_id: str, is_admin: b
             rows = await cursor.fetchall()
             return [r["account_id"] for r in rows]
 
-    # 协作者只可用分配给他们的账号
-    async with aiosqlite.connect(str(DB_PATH)) as db:
-        db.row_factory = aiosqlite.Row
+        # 检查是否为 owner
+        cursor = await db.execute(
+            "SELECT role FROM project_members WHERE project_id=? AND user_id=?",
+            (project_id, user_id)
+        )
+        row = await cursor.fetchone()
+        if row and row["role"] == "owner":
+            cursor = await db.execute(
+                "SELECT account_id FROM project_accounts WHERE project_id=?",
+                (project_id,)
+            )
+            rows = await cursor.fetchall()
+            return [r["account_id"] for r in rows]
+
+        # 协作者只可用分配给他们的账号
         cursor = await db.execute(
             "SELECT account_id FROM member_accounts WHERE project_id=? AND user_id=?",
             (project_id, user_id)
@@ -237,8 +251,9 @@ async def can_user_use_account(user_id: str, project_id: str, account_id: str, i
 
 
 async def is_first_user() -> bool:
-    """检查是否是第一个用户（用于自动设置管理员）"""
+    """检查当前是否只有一个用户（登录时用于自动设置管理员）"""
     async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
         cursor = await db.execute("SELECT COUNT(*) as count FROM users WHERE deleted_at IS NULL")
         row = await cursor.fetchone()
-        return row["count"] == 0
+        return row["count"] == 1

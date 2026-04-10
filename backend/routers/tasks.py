@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Optional
 
 import aiosqlite
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
-from fastapi.responses import Response
+from fastapi import APIRouter, Cookie, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import Response, StreamingResponse
 
 from config import ACCOUNTS_DIR, UPLOAD_DIR, DB_PATH
 from models import TaskResponse
@@ -24,7 +24,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _row_to_task(row) -> TaskResponse:
+def _row_to_task(row, creator_name: str = None) -> TaskResponse:
     return TaskResponse(
         id=row["id"],
         account_id=row["account_id"],
@@ -39,6 +39,7 @@ def _row_to_task(row) -> TaskResponse:
         project_id=row["project_id"] if "project_id" in row.keys() else None,
         label=row["label"] if "label" in row.keys() else None,
         creator_id=row["creator_id"] if "creator_id" in row.keys() else None,
+        creator_name=creator_name,
         episode=row["episode"] if "episode" in row.keys() else None,
     )
 
@@ -76,7 +77,7 @@ async def create_task(
     images: list[UploadFile] = File(default=[]),
     videos: list[UploadFile] = File(default=[]),
     audios: list[UploadFile] = File(default=[]),
-    session_id: str = None,
+    session_id: str = Cookie(None),
 ):
     user = await get_current_user_or_admin(session_id)
 
@@ -114,6 +115,17 @@ async def create_task(
                 if row and episode > row["episode_count"]:
                     raise HTTPException(400, f"分集号超出范围，最大为 {row['episode_count']}")
 
+        # 检查同一集内标签是否重复
+        if episode and label:
+            async with aiosqlite.connect(str(DB_PATH)) as db:
+                db.row_factory = aiosqlite.Row
+                cursor = await db.execute(
+                    "SELECT id FROM tasks WHERE project_id=? AND episode=? AND label=?",
+                    (project_id, episode, label)
+                )
+                if await cursor.fetchone():
+                    raise HTTPException(400, f"第{episode}集已存在标签为「{label}」的任务")
+
     # Check account exists and is logged in
     if not is_account_logged_in(account_id):
         account_home = ACCOUNT_HOME_BASE / account_id
@@ -148,29 +160,41 @@ async def create_task(
     })
     now = _now()
 
-    # Try to submit, handle concurrency limit
+    # 检查该账号当前活跃任务数，决定是直接提交还是排队
     submit_id = None
     task_status = "queued"
 
-    try:
-        submit_id = await submit_multimodal2video(
-            account_id=account_id,
-            image_paths=image_paths,
-            video_paths=video_paths,
-            audio_paths=audio_paths,
-            prompt=prompt,
-            duration=duration,
-            ratio=ratio,
-            model_version=model_version,
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        cursor = await db.execute(
+            "SELECT COUNT(*) as cnt FROM tasks WHERE account_id=? AND status IN ('pending', 'processing', 'submitting')",
+            (account_id,)
         )
-        task_status = "pending"
-    except ConcurrencyLimitError:
-        # Task queued, will be submitted by background dispatcher
+        row = await cursor.fetchone()
+        active_count = row[0]
+
+    # 如果活跃任务数 >= 10，直接排队
+    if active_count >= 10:
         asyncio.get_event_loop().call_later(1, lambda: asyncio.ensure_future(dispatch_queued_tasks()))
-    except Exception as e:
-        # Real error, clean up and fail
-        shutil.rmtree(task_dir, ignore_errors=True)
-        raise HTTPException(status_code=502, detail=str(e))
+    else:
+        try:
+            submit_id = await submit_multimodal2video(
+                account_id=account_id,
+                image_paths=image_paths,
+                video_paths=video_paths,
+                audio_paths=audio_paths,
+                prompt=prompt,
+                duration=duration,
+                ratio=ratio,
+                model_version=model_version,
+            )
+            task_status = "pending"
+        except ConcurrencyLimitError:
+            # CLI 返回限流，排队
+            asyncio.get_event_loop().call_later(1, lambda: asyncio.ensure_future(dispatch_queued_tasks()))
+        except Exception as e:
+            # 真实错误
+            shutil.rmtree(task_dir, ignore_errors=True)
+            raise HTTPException(status_code=502, detail=str(e))
 
     # Insert task to database
     async with aiosqlite.connect(str(DB_PATH)) as db:
@@ -182,8 +206,12 @@ async def create_task(
         await db.commit()
         cursor = await db.execute("SELECT * FROM tasks WHERE id=?", (task_id,))
         row = await cursor.fetchone()
+        # 获取创建者用户名
+        cursor = await db.execute("SELECT username FROM users WHERE id=?", (user["id"],))
+        user_row = await cursor.fetchone()
+        creator_name = user_row["username"] if user_row else None
 
-    return _row_to_task(row)
+    return _row_to_task(row, creator_name)
 
 
 @router.get("", response_model=list[TaskResponse])
@@ -192,44 +220,66 @@ async def list_tasks(
     account_id: Optional[str] = None,
     project_id: Optional[str] = None,
     episode: Optional[int] = None,
-    session_id: str = None
+    session_id: str = Cookie(None)
 ):
     user = await get_current_user_or_admin(session_id)
 
-    query = "SELECT * FROM tasks WHERE 1=1"
+    query = """SELECT t.*, u.username as creator_name
+               FROM tasks t LEFT JOIN users u ON t.creator_id = u.id WHERE 1=1"""
     params = []
 
     if status:
-        query += " AND status=?"
+        query += " AND t.status=?"
         params.append(status)
     if account_id:
-        query += " AND account_id=?"
+        query += " AND t.account_id=?"
         params.append(account_id)
-    if project_id:
-        query += " AND project_id=?"
-        params.append(project_id)
     if episode:
-        query += " AND episode=?"
+        query += " AND t.episode=?"
         params.append(episode)
 
-    # 非管理员只看自己的任务
+    # 权限过滤
     if not user["is_admin"]:
-        query += " AND creator_id=?"
-        params.append(user["id"])
+        if project_id:
+            # 检查用户在项目中的角色
+            async with aiosqlite.connect(str(DB_PATH)) as db:
+                db.row_factory = aiosqlite.Row
+                cursor = await db.execute(
+                    "SELECT role FROM project_members WHERE project_id=? AND user_id=?",
+                    (project_id, user["id"])
+                )
+                member_row = await cursor.fetchone()
+                if member_row and member_row["role"] == "owner":
+                    # owner 可以看项目内所有任务
+                    query += " AND t.project_id=?"
+                    params.append(project_id)
+                else:
+                    # member 只看自己的任务
+                    query += " AND t.project_id=? AND t.creator_id=?"
+                    params.extend([project_id, user["id"]])
+        else:
+            # 无项目上下文，只看自己的任务
+            query += " AND t.creator_id=?"
+            params.append(user["id"])
+    elif project_id:
+        # 管理员指定项目时也要过滤
+        query += " AND t.project_id=?"
+        params.append(project_id)
 
-    query += " ORDER BY created_at DESC"
+    query += " ORDER BY t.created_at DESC"
 
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(query, params)
         rows = await cursor.fetchall()
 
-    return [_row_to_task(r) for r in rows]
+    return [_row_to_task(r, r["creator_name"]) for r in rows]
 
 
 @router.get("/counts")
-async def get_task_counts():
+async def get_task_counts(session_id: str = Cookie(None)):
     """返回各账号的生成中（pending+processing）和排队中（queued）任务数"""
+    await get_current_user_or_admin(session_id)
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
@@ -253,7 +303,8 @@ async def get_task_counts():
 
 
 @router.get("/{task_id}", response_model=TaskResponse)
-async def get_task(task_id: str):
+async def get_task(task_id: str, session_id: str = Cookie(None)):
+    await get_current_user_or_admin(session_id)
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute("SELECT * FROM tasks WHERE id=?", (task_id,))
@@ -264,7 +315,8 @@ async def get_task(task_id: str):
 
 
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_task(task_id: str):
+async def delete_task(task_id: str, session_id: str = Cookie(None)):
+    await get_current_user_or_admin(session_id)
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute("SELECT id, status FROM tasks WHERE id=?", (task_id,))
@@ -284,7 +336,8 @@ async def delete_task(task_id: str):
 
 
 @router.post("/{task_id}/copy", status_code=status.HTTP_201_CREATED, response_model=TaskResponse)
-async def copy_task(task_id: str):
+async def copy_task(task_id: str, session_id: str = Cookie(None)):
+    await get_current_user_or_admin(session_id)
     """复制任务：包括项目关联、媒体文件、提示词、标签等"""
     async with aiosqlite.connect(str(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
@@ -353,3 +406,35 @@ async def copy_task(task_id: str):
         row = await cursor.fetchone()
 
     return _row_to_task(row)
+
+
+@router.get("/{task_id}/download")
+async def download_task(task_id: str, session_id: str = Cookie(None)):
+    """代理下载任务视频，以标签作为文件名"""
+    await get_current_user_or_admin(session_id)
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM tasks WHERE id=?", (task_id,))
+        row = await cursor.fetchone()
+    if not row:
+        raise HTTPException(404, "任务不存在")
+    if row["status"] != "success" or not row["result_url"]:
+        raise HTTPException(400, "任务未完成")
+
+    label = row["label"] or task_id
+    episode = row["episode"]
+    filename = f"{episode}-{label}.mp4" if episode else f"{label}.mp4"
+
+    import httpx
+
+    async def stream():
+        async with httpx.AsyncClient(timeout=60) as client:
+            async with client.stream("GET", row["result_url"]) as resp:
+                async for chunk in resp.aiter_bytes(8192):
+                    yield chunk
+
+    return StreamingResponse(
+        stream(),
+        media_type="video/mp4",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )

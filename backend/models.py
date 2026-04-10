@@ -35,6 +35,7 @@ class TaskResponse(BaseModel):
     project_id: Optional[str] = None
     label: Optional[str] = None
     creator_id: Optional[str] = None
+    creator_name: Optional[str] = None
     episode: Optional[int] = None
 
 
@@ -54,6 +55,8 @@ class ProjectResponse(BaseModel):
     updated_at: str
     episode_count: Optional[int] = 50
     creator_id: Optional[str] = None
+    my_role: Optional[str] = None  # 当前用户在项目中的角色：owner / member，admin 为 owner
+    creator_name: Optional[str] = None  # 项目拥有者用户名
 
 
 class ProjectStats(BaseModel):

@@ -154,81 +154,78 @@ async def dispatch_queued_tasks():
     try:
         async with aiosqlite.connect(str(DB_PATH)) as db:
             db.row_factory = aiosqlite.Row
-            await db.execute("BEGIN IMMEDIATE")  # 获取写锁，防止并发修改
-            try:
-                # 获取所有 queued 任务
+            # 获取所有 queued 任务
+            cursor = await db.execute(
+                "SELECT id, account_id, prompt, params FROM tasks WHERE status='queued' ORDER BY created_at"
+            )
+            queued_tasks = await cursor.fetchall()
+
+        # 在事务外逐个处理
+        for task in queued_tasks:
+            task_id = task["id"]
+            account_id = task["account_id"]
+            params = json.loads(task["params"]) if task["params"] else {}
+
+            # 检查该账号当前活跃任务数
+            async with aiosqlite.connect(str(DB_PATH)) as db:
                 cursor = await db.execute(
-                    "SELECT id, account_id, prompt, params FROM tasks WHERE status='queued' ORDER BY created_at"
+                    "SELECT COUNT(*) as cnt FROM tasks WHERE account_id=? AND status IN ('pending', 'processing', 'submitting')",
+                    (account_id,)
                 )
-                queued_tasks = await cursor.fetchall()
+                row = await cursor.fetchone()
+                active_count = row["cnt"]
 
-                for task in queued_tasks:
-                    task_id = task["id"]
-                    account_id = task["account_id"]
-                    params = json.loads(task["params"]) if task["params"] else {}
+            if active_count >= MAX_CONCURRENT_PER_ACCOUNT:
+                continue  # 该账号已满，跳过
 
-                    # 检查该账号当前活跃任务数（在同一事务中）
-                    cursor = await db.execute(
-                        "SELECT COUNT(*) as cnt FROM tasks WHERE account_id=? AND status IN ('pending', 'processing', 'submitting')",
-                        (account_id,)
-                    )
-                    row = await cursor.fetchone()
-                    active_count = row["cnt"]
+            # 预留槽位：先将状态改为 'submitting'
+            async with aiosqlite.connect(str(DB_PATH)) as db:
+                await db.execute(
+                    "UPDATE tasks SET status='submitting', updated_at=? WHERE id=?",
+                    (datetime.now(timezone.utc).isoformat(), task_id)
+                )
+                await db.commit()
 
-                    if active_count >= MAX_CONCURRENT_PER_ACCOUNT:
-                        continue  # 该账号已满，跳过
-
-                    # 预留槽位：先将状态改为 'submitting'（防止其他 dispatcher 抢占）
+            # 执行外部提交
+            try:
+                submit_id = await submit_multimodal2video(
+                    account_id=account_id,
+                    image_paths=params.get("image_paths", []),
+                    video_paths=params.get("video_paths", []),
+                    audio_paths=params.get("audio_paths", []),
+                    prompt=task["prompt"] or "",
+                    duration=params.get("duration", 5),
+                    ratio=params.get("ratio", "9:16"),
+                    model_version=params.get("model_version", "seedance2.0fast"),
+                )
+                now = datetime.now(timezone.utc).isoformat()
+                async with aiosqlite.connect(str(DB_PATH)) as db:
                     await db.execute(
-                        "UPDATE tasks SET status='submitting', updated_at=? WHERE id=?",
+                        "UPDATE tasks SET status='pending', submit_id=?, updated_at=? WHERE id=?",
+                        (submit_id, now, task_id),
+                    )
+                    await db.commit()
+                logger.info(f"Queued task {task_id} submitted as {submit_id}")
+            except ConcurrencyLimitError:
+                # 仍然限流，恢复为 queued
+                async with aiosqlite.connect(str(DB_PATH)) as db:
+                    await db.execute(
+                        "UPDATE tasks SET status='queued', updated_at=? WHERE id=?",
                         (datetime.now(timezone.utc).isoformat(), task_id)
                     )
-                    await db.commit()  # 提交预留
+                    await db.commit()
+                logger.debug(f"Task {task_id} still queued (concurrency limit)")
+                break  # 该账号限流，跳出循环
+            except Exception as e:
+                # 真实错误，标记失败
+                now = datetime.now(timezone.utc).isoformat()
+                async with aiosqlite.connect(str(DB_PATH)) as db:
+                    await db.execute(
+                        "UPDATE tasks SET status='failed', error_msg=?, updated_at=? WHERE id=?",
+                        (str(e), now, task_id),
+                    )
+                    await db.commit()
+                logger.warning(f"Queued task {task_id} failed: {e}")
 
-                    # 在事务外执行外部提交（可能很慢）
-                    try:
-                        submit_id = await submit_multimodal2video(
-                            account_id=account_id,
-                            image_paths=params.get("image_paths", []),
-                            video_paths=params.get("video_paths", []),
-                            audio_paths=params.get("audio_paths", []),
-                            prompt=task["prompt"] or "",
-                            duration=params.get("duration", 5),
-                            ratio=params.get("ratio", "9:16"),
-                            model_version=params.get("model_version", "seedance2.0fast"),
-                        )
-                        now = datetime.now(timezone.utc).isoformat()
-                        async with aiosqlite.connect(str(DB_PATH)) as db2:
-                            await db2.execute(
-                                "UPDATE tasks SET status='pending', submit_id=?, updated_at=? WHERE id=?",
-                                (submit_id, now, task_id),
-                            )
-                            await db2.commit()
-                        logger.info(f"Queued task {task_id} submitted as {submit_id}")
-                    except ConcurrencyLimitError:
-                        # 仍然限流，恢复为 queued
-                        async with aiosqlite.connect(str(DB_PATH)) as db2:
-                            await db2.execute(
-                                "UPDATE tasks SET status='queued', updated_at=? WHERE id=?",
-                                (datetime.now(timezone.utc).isoformat(), task_id)
-                            )
-                            await db2.commit()
-                        logger.debug(f"Task {task_id} still queued (concurrency limit)")
-                        break  # 该账号限流，跳出循环尝试其他账号
-                    except Exception as e:
-                        # 真实错误，标记失败
-                        now = datetime.now(timezone.utc).isoformat()
-                        async with aiosqlite.connect(str(DB_PATH)) as db2:
-                            await db2.execute(
-                                "UPDATE tasks SET status='failed', error_msg=?, updated_at=? WHERE id=?",
-                                (str(e), now, task_id),
-                            )
-                            await db2.commit()
-                        logger.warning(f"Queued task {task_id} failed: {e}")
-
-                # 重新开始事务继续处理
-                await db.execute("BEGIN IMMEDIATE")
-            finally:
-                await db.commit()  # 确保事务结束
     except Exception as e:
         logger.error(f"Queue dispatcher error: {e}")

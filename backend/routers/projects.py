@@ -5,8 +5,9 @@ from pathlib import Path
 from typing import Optional
 
 import aiosqlite
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Cookie, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import Response
+from pydantic import BaseModel
 
 from config import DB_PATH, MATERIALS_DIR
 from models import (
@@ -91,7 +92,7 @@ async def check_project_access(project_id: str, user: dict, require_owner: bool 
 # ==================== 项目 API ====================
 
 @router.get("", response_model=list[ProjectResponse])
-async def list_projects(include_deleted: bool = False, session_id: str = None):
+async def list_projects(include_deleted: bool = False, session_id: str = Cookie(None)):
     """获取项目列表（根据用户权限过滤）"""
     user = await get_current_user_or_admin(session_id)
 
@@ -115,12 +116,34 @@ async def list_projects(include_deleted: bool = False, session_id: str = None):
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(query, params)
         rows = await cursor.fetchall()
+        result = []
+        for r in rows:
+            p = _row_to_project(r)
+            if user["is_admin"]:
+                p.my_role = "owner"
+            else:
+                rc = await db.execute(
+                    "SELECT role FROM project_members WHERE project_id=? AND user_id=?",
+                    (r["id"], user["id"])
+                )
+                mr = await rc.fetchone()
+                p.my_role = mr["role"] if mr else None
+            # 查询 owner 用户名
+            oc = await db.execute(
+                """SELECT u.username FROM project_members pm
+                   JOIN users u ON pm.user_id = u.id
+                   WHERE pm.project_id=? AND pm.role='owner' LIMIT 1""",
+                (r["id"],)
+            )
+            owner = await oc.fetchone()
+            p.creator_name = owner["username"] if owner else None
+            result.append(p)
 
-    return [_row_to_project(r) for r in rows]
+    return result
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=ProjectResponse)
-async def create_project(data: ProjectCreate, session_id: str = None):
+async def create_project(data: ProjectCreate, session_id: str = Cookie(None)):
     """创建项目"""
     user = await get_current_user_or_admin(session_id)
 
@@ -147,7 +170,7 @@ async def create_project(data: ProjectCreate, session_id: str = None):
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
-async def get_project(project_id: str, session_id: str = None):
+async def get_project(project_id: str, session_id: str = Cookie(None)):
     """获取单个项目"""
     user = await get_current_user_or_admin(session_id)
     await check_project_access(project_id, user)
@@ -156,14 +179,26 @@ async def get_project(project_id: str, session_id: str = None):
         db.row_factory = aiosqlite.Row
         cursor = await db.execute("SELECT * FROM projects WHERE id=?", (project_id,))
         row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(404, "项目不存在")
 
-    if not row:
-        raise HTTPException(404, "项目不存在")
-    return _row_to_project(row)
+        if user["is_admin"]:
+            my_role = "owner"
+        else:
+            rc = await db.execute(
+                "SELECT role FROM project_members WHERE project_id=? AND user_id=?",
+                (project_id, user["id"])
+            )
+            mr = await rc.fetchone()
+            my_role = mr["role"] if mr else None
+
+    p = _row_to_project(row)
+    p.my_role = my_role
+    return p
 
 
 @router.put("/{project_id}", response_model=ProjectResponse)
-async def update_project(project_id: str, data: ProjectUpdate, session_id: str = None):
+async def update_project(project_id: str, data: ProjectUpdate, session_id: str = Cookie(None)):
     """更新项目名称"""
     user = await get_current_user_or_admin(session_id)
     await check_project_access(project_id, user, require_owner=True)
@@ -187,7 +222,7 @@ async def update_project(project_id: str, data: ProjectUpdate, session_id: str =
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_project(project_id: str, permanent: bool = False, session_id: str = None):
+async def delete_project(project_id: str, permanent: bool = False, session_id: str = Cookie(None)):
     """软删除或永久删除项目"""
     user = await get_current_user_or_admin(session_id)
     await check_project_access(project_id, user, require_owner=True)
@@ -222,7 +257,7 @@ async def delete_project(project_id: str, permanent: bool = False, session_id: s
 
 
 @router.post("/{project_id}/restore", response_model=ProjectResponse)
-async def restore_project(project_id: str, session_id: str = None):
+async def restore_project(project_id: str, session_id: str = Cookie(None)):
     """恢复已删除的项目"""
     user = await get_current_user_or_admin(session_id)
     await check_project_access(project_id, user, require_owner=True)
@@ -250,7 +285,7 @@ async def restore_project(project_id: str, session_id: str = None):
 
 
 @router.get("/{project_id}/stats", response_model=ProjectStats)
-async def get_project_stats(project_id: str, session_id: str = None):
+async def get_project_stats(project_id: str, session_id: str = Cookie(None)):
     """获取项目统计"""
     user = await get_current_user_or_admin(session_id)
     await check_project_access(project_id, user)
@@ -278,7 +313,7 @@ async def get_project_stats(project_id: str, session_id: str = None):
 # ==================== 成员管理 API ====================
 
 @router.get("/{project_id}/members", response_model=list[MemberResponse])
-async def list_project_members(project_id: str, session_id: str = None):
+async def list_project_members(project_id: str, session_id: str = Cookie(None)):
     """获取项目成员列表"""
     user = await get_current_user_or_admin(session_id)
     await check_project_access(project_id, user)
@@ -319,7 +354,7 @@ async def list_project_members(project_id: str, session_id: str = None):
 
 
 @router.post("/{project_id}/members", status_code=status.HTTP_201_CREATED)
-async def add_project_member(project_id: str, data: MemberAdd, session_id: str = None):
+async def add_project_member(project_id: str, data: MemberAdd, session_id: str = Cookie(None)):
     """添加项目成员"""
     user = await get_current_user_or_admin(session_id)
     await check_project_access(project_id, user, require_owner=True)
@@ -353,7 +388,7 @@ async def add_project_member(project_id: str, data: MemberAdd, session_id: str =
 
 
 @router.delete("/{project_id}/members/{user_id}")
-async def remove_project_member(project_id: str, user_id: str, session_id: str = None):
+async def remove_project_member(project_id: str, user_id: str, session_id: str = Cookie(None)):
     """移除项目成员"""
     user = await get_current_user_or_admin(session_id)
     await check_project_access(project_id, user, require_owner=True)
@@ -377,7 +412,7 @@ async def remove_project_member(project_id: str, user_id: str, session_id: str =
 # ==================== 账号管理 API ====================
 
 @router.get("/{project_id}/accounts", response_model=list[str])
-async def get_project_accounts(project_id: str, session_id: str = None):
+async def get_project_accounts(project_id: str, session_id: str = Cookie(None)):
     """获取项目账号池"""
     user = await get_current_user_or_admin(session_id)
     await check_project_access(project_id, user)
@@ -393,8 +428,82 @@ async def get_project_accounts(project_id: str, session_id: str = None):
     return [r["account_id"] for r in rows]
 
 
+class UsableAccount(BaseModel):
+    id: str
+    credit: Optional[str] = None
+    running: int = 0   # 执行中任务数
+    queued: int = 0    # 排队中任务数
+
+
+@router.get("/{project_id}/usable-accounts", response_model=list[UsableAccount])
+async def get_usable_accounts(project_id: str, session_id: str = Cookie(None)):
+    """获取当前用户在项目中可用的账号列表（含余额和队列状态）"""
+    from services.dreamina import get_credit, is_account_logged_in
+
+    user = await get_current_user_or_admin(session_id)
+    await check_project_access(project_id, user)
+
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+
+        # 获取项目账号池
+        cursor = await db.execute(
+            "SELECT account_id FROM project_accounts WHERE project_id=?",
+            (project_id,)
+        )
+        project_accounts = {r["account_id"] for r in await cursor.fetchall()}
+
+        # admin 或 owner 可用全部项目账号
+        is_owner = user["is_admin"]
+        if not is_owner:
+            cursor = await db.execute(
+                "SELECT role FROM project_members WHERE project_id=? AND user_id=?",
+                (project_id, user["id"])
+            )
+            row = await cursor.fetchone()
+            is_owner = row and row["role"] == "owner"
+
+        if is_owner:
+            usable = list(project_accounts)
+        else:
+            # 协作者只能用分配给自己的账号
+            cursor = await db.execute(
+                "SELECT account_id FROM member_accounts WHERE project_id=? AND user_id=?",
+                (project_id, user["id"])
+            )
+            usable = [r["account_id"] for r in await cursor.fetchall() if r["account_id"] in project_accounts]
+
+        # 统计各账号任务数
+        cursor = await db.execute(
+            """SELECT account_id,
+                      SUM(CASE WHEN status IN ('pending','processing') THEN 1 ELSE 0 END) as running,
+                      SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) as queued
+               FROM tasks WHERE project_id=? GROUP BY account_id""",
+            (project_id,)
+        )
+        task_counts = {r["account_id"]: {"running": r["running"], "queued": r["queued"]} for r in await cursor.fetchall()}
+
+    result = []
+    for acc_id in usable:
+        credit = None
+        if is_account_logged_in(acc_id):
+            try:
+                credit = await get_credit(acc_id)
+            except Exception:
+                pass
+        counts = task_counts.get(acc_id, {"running": 0, "queued": 0})
+        result.append(UsableAccount(
+            id=acc_id,
+            credit=credit,
+            running=counts["running"],
+            queued=counts["queued"]
+        ))
+
+    return result
+
+
 @router.put("/{project_id}/accounts")
-async def set_project_accounts(project_id: str, data: AccountAssignment, session_id: str = None):
+async def set_project_accounts(project_id: str, data: AccountAssignment, session_id: str = Cookie(None)):
     """设置项目账号池"""
     user = await get_current_user_or_admin(session_id)
     await check_project_access(project_id, user, require_owner=True)
@@ -417,7 +526,7 @@ async def set_project_accounts(project_id: str, data: AccountAssignment, session
 
 
 @router.get("/{project_id}/member-accounts/{user_id}", response_model=list[str])
-async def get_member_accounts(project_id: str, user_id: str, session_id: str = None):
+async def get_member_accounts(project_id: str, user_id: str, session_id: str = Cookie(None)):
     """获取成员可用账号"""
     user = await get_current_user_or_admin(session_id)
     await check_project_access(project_id, user)
@@ -434,7 +543,7 @@ async def get_member_accounts(project_id: str, user_id: str, session_id: str = N
 
 
 @router.put("/{project_id}/member-accounts/{user_id}")
-async def set_member_accounts(project_id: str, user_id: str, data: AccountAssignment, session_id: str = None):
+async def set_member_accounts(project_id: str, user_id: str, data: AccountAssignment, session_id: str = Cookie(None)):
     """设置成员可用账号"""
     user = await get_current_user_or_admin(session_id)
     await check_project_access(project_id, user, require_owner=True)
@@ -472,7 +581,7 @@ async def set_member_accounts(project_id: str, user_id: str, data: AccountAssign
 # ==================== 项目设置 API ====================
 
 @router.put("/{project_id}/settings")
-async def update_project_settings(project_id: str, data: ProjectSettingsUpdate, session_id: str = None):
+async def update_project_settings(project_id: str, data: ProjectSettingsUpdate, session_id: str = Cookie(None)):
     """更新项目设置"""
     user = await get_current_user_or_admin(session_id)
     await check_project_access(project_id, user, require_owner=True)
@@ -507,7 +616,7 @@ ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".ogg", ".m4a", ".aac"}
 
 
 @router.get("/{project_id}/materials", response_model=list[MaterialResponse])
-async def list_materials(project_id: str, type: Optional[str] = None, session_id: str = None):
+async def list_materials(project_id: str, type: Optional[str] = None, session_id: str = Cookie(None)):
     """获取项目素材列表"""
     user = await get_current_user_or_admin(session_id)
     await check_project_access(project_id, user)
@@ -538,7 +647,7 @@ async def create_material(
     name: str = Form(...),
     type: str = Form(...),
     file: UploadFile = File(...),
-    session_id: str = None,
+    session_id: str = Cookie(None),
 ):
     """上传素材"""
     user = await get_current_user_or_admin(session_id)
@@ -586,7 +695,7 @@ async def create_material(
 
 
 @router.put("/{project_id}/materials/{material_id}", response_model=MaterialResponse)
-async def update_material(project_id: str, material_id: str, data: MaterialUpdate, session_id: str = None):
+async def update_material(project_id: str, material_id: str, data: MaterialUpdate, session_id: str = Cookie(None)):
     """更新素材名称"""
     user = await get_current_user_or_admin(session_id)
     await check_project_access(project_id, user)
@@ -614,7 +723,7 @@ async def update_material(project_id: str, material_id: str, data: MaterialUpdat
 
 
 @router.delete("/{project_id}/materials/{material_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_material(project_id: str, material_id: str, session_id: str = None):
+async def delete_material(project_id: str, material_id: str, session_id: str = Cookie(None)):
     """删除素材"""
     user = await get_current_user_or_admin(session_id)
     await check_project_access(project_id, user)
