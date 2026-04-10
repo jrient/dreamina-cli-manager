@@ -1,13 +1,15 @@
 # backend/main.py
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+import aiosqlite
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from config import POLL_INTERVAL, RESULTS_DIR, UPLOAD_DIR
+from config import DB_PATH, POLL_INTERVAL, RESULTS_DIR, UPLOAD_DIR
 from database import init_db, close_db
 from routers.accounts import router as accounts_router
 from routers.tasks import router as tasks_router
@@ -20,12 +22,26 @@ logging.basicConfig(level=logging.INFO)
 scheduler = AsyncIOScheduler()
 
 
+async def _cleanup_orphan_materials():
+    """删除 DB 中 file_path 指向不存在文件的素材记录，防止前端显示 FAILED。"""
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT id, file_path FROM materials")
+        rows = await cursor.fetchall()
+        orphans = [r["id"] for r in rows if not Path(r["file_path"]).exists()]
+        if orphans:
+            await db.executemany("DELETE FROM materials WHERE id=?", [(i,) for i in orphans])
+            await db.commit()
+            logging.warning("启动清理：删除 %d 条孤立素材记录（文件不存在）", len(orphans))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     # 确保结果目录存在
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    await _cleanup_orphan_materials()
     scheduler.add_job(poll_tasks, "interval", seconds=POLL_INTERVAL, id="poller")
     scheduler.start()
     yield
@@ -37,7 +53,8 @@ app = FastAPI(title="Dreamina Web UI", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://localhost:8080"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

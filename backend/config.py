@@ -5,8 +5,9 @@ from pathlib import Path
 ACCOUNTS_DIR = Path(os.getenv("ACCOUNTS_DIR", "/app/accounts"))
 CONFIG_BASE = Path(os.getenv("CONFIG_BASE", "/app/configs"))
 DB_PATH = Path(os.getenv("DB_PATH", "/app/db/tasks.db"))
-UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
-RESULTS_DIR = Path(os.getenv("RESULTS_DIR", "/app/results"))
+# 持久化路径固定为 volume 挂载目录，不可通过环境变量修改，防止容器重建后文件丢失
+UPLOAD_DIR = Path("/app/uploads")
+RESULTS_DIR = Path("/app/results")
 MATERIALS_DIR = UPLOAD_DIR / "materials"
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "60"))
 
