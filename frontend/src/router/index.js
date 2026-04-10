@@ -15,6 +15,7 @@ import AdminProjects from '../views/AdminProjects.vue'
 import AdminAccounts from '../views/AdminAccounts.vue'
 import AdminTasks from '../views/AdminTasks.vue'
 import UserManagement from '../views/UserManagement.vue'
+import ProjectLayout from '../views/ProjectLayout.vue'
 
 const routes = [
   {
@@ -25,9 +26,7 @@ const routes = [
   },
   {
     path: '/',
-    name: 'home',
-    component: HomePage,
-    meta: { requiresAuth: true }
+    redirect: '/projects'
   },
   {
     path: '/accounts',
@@ -42,22 +41,15 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
-    path: '/projects/:id/tasks',
-    name: 'project-tasks',
-    component: ProjectTasks,
-    meta: { requiresAuth: true }
-  },
-  {
-    path: '/projects/:id/materials',
-    name: 'project-materials',
-    component: ProjectMaterials,
-    meta: { requiresAuth: true }
-  },
-  {
-    path: '/projects/:id/settings',
-    name: 'project-settings',
-    component: ProjectSettings,
-    meta: { requiresAuth: true }
+    path: '/projects/:id',
+    component: ProjectLayout,
+    meta: { requiresAuth: true },
+    children: [
+      { path: '', redirect: to => ({ name: 'project-tasks', params: to.params }) },
+      { path: 'tasks', name: 'project-tasks', component: ProjectTasks, meta: { requiresAuth: true } },
+      { path: 'materials', name: 'project-materials', component: ProjectMaterials, meta: { requiresAuth: true } },
+      { path: 'settings', name: 'project-settings', component: ProjectSettings, meta: { requiresAuth: true } },
+    ]
   },
   {
     path: '/admin',
