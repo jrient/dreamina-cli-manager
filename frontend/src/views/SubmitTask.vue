@@ -2,15 +2,40 @@
 <template>
   <div class="submit-panel">
     <el-form :model="form" label-position="top" @submit.prevent="submit">
+      <!-- 账号选择（项目上下文） -->
+      <div class="account-row" v-if="showProjectFields">
+        <el-form-item label="账号 *" class="account-select-item">
+          <el-select v-model="selectedAccountId" placeholder="选择账号" style="width:140px" @change="onAccountChange">
+            <el-option
+              v-for="acc in usableAccounts"
+              :key="acc.id"
+              :label="acc.id"
+              :value="acc.id"
+            >
+              <span>{{ acc.id }}</span>
+              <span v-if="acc.credit" class="account-credit"> 余额:{{ acc.credit }}</span>
+            </el-option>
+          </el-select>
+          <el-button :loading="loadingAccounts" text size="small" @click="loadUsableAccounts">
+            <el-icon><Refresh /></el-icon>
+          </el-button>
+        </el-form-item>
+      </div>
+
       <!-- 项目和标签 -->
       <div class="project-row" v-if="showProjectFields">
-        <el-form-item label="项目" class="project-select-item">
-          <el-select v-model="form.project_id" placeholder="选择项目" clearable>
-            <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
-          </el-select>
+        <el-form-item label="标签 *" class="label-input-item">
+          <el-input v-model="form.label" placeholder="必填标签" maxlength="50" show-word-limit />
         </el-form-item>
-        <el-form-item label="标签" class="label-input-item">
-          <el-input v-model="form.label" placeholder="可选标签" maxlength="50" show-word-limit />
+        <el-form-item label="集数 *" class="episode-input-item">
+          <el-select v-model="form.episode" placeholder="选择集数" style="width:130px">
+            <el-option
+              v-for="ep in episodeOptions"
+              :key="ep.value"
+              :label="ep.label"
+              :value="ep.value"
+            />
+          </el-select>
         </el-form-item>
       </div>
 
@@ -159,12 +184,12 @@
         type="primary"
         native-type="submit"
         :loading="submitting"
-        :disabled="!accountId"
+        :disabled="!effectiveAccountId"
         class="submit-btn"
       >
         ✨ 开始生成
       </el-button>
-      <div v-if="!accountId" class="submit-hint">请先在顶部选择账号</div>
+      <div v-if="!effectiveAccountId" class="submit-hint">请先选择账号</div>
     </el-form>
   </div>
 </template>
@@ -173,6 +198,7 @@
 import { ref, inject, computed, onMounted, watch, nextTick } from 'vue'
 import { onClickOutside } from '@vueuse/core'
 import { ElMessage } from 'element-plus'
+import { Refresh } from '@element-plus/icons-vue'
 import { api } from '../api/index.js'
 
 const props = defineProps({
@@ -180,7 +206,34 @@ const props = defineProps({
 })
 const emit = defineEmits(['submitted'])
 
-const accountId = inject('selectedAccountId')
+const globalAccountId = inject('selectedAccountId')
+
+// 项目内账号选择器状态
+const selectedAccountId = ref('')
+const usableAccounts = ref([])
+const loadingAccounts = ref(false)
+
+const currentAccount = computed(() => usableAccounts.value.find(a => a.id === selectedAccountId.value))
+const effectiveAccountId = computed(() => props.projectId ? selectedAccountId.value : globalAccountId.value)
+
+async function loadUsableAccounts() {
+  if (!props.projectId) return
+  loadingAccounts.value = true
+  try {
+    usableAccounts.value = await api.getUsableAccounts(props.projectId)
+    if (usableAccounts.value.length && !selectedAccountId.value) {
+      selectedAccountId.value = usableAccounts.value[0].id
+    }
+  } catch (e) {
+    usableAccounts.value = []
+  } finally {
+    loadingAccounts.value = false
+  }
+}
+
+function onAccountChange() {
+  // 切换账号时不做额外处理，状态已自动更新
+}
 
 const ratios = ['1:1', '16:9', '9:16', '4:3', '3:4', '21:9']
 const models = [
@@ -191,6 +244,16 @@ const models = [
 ]
 
 const projects = ref([])
+const projectEpisodeCount = ref(0)
+const episodeStats = ref({}) // { ep: { total, success } }
+
+const episodeOptions = computed(() => {
+  return Array.from({ length: projectEpisodeCount.value }, (_, i) => {
+    const ep = i + 1
+    const s = episodeStats.value[ep] || { total: 0, success: 0 }
+    return { value: ep, label: `${ep} [${s.success}/${s.total}]` }
+  })
+})
 const form = ref({
   images: [],
   audios: [],
@@ -201,6 +264,7 @@ const form = ref({
   model_version: 'seedance2.0fast',
   project_id: '',
   label: '',
+  episode: null,
 })
 const submitting = ref(false)
 const hoverCard = ref('')
@@ -211,6 +275,46 @@ const showProjectFields = computed(() => props.projectId)
 const projectMaterials = ref([])
 const materialMap = ref({}) // { materialId: { type: 'image'|'audio', index: N } }
 
+async function loadEpisodeStats(projectId) {
+  try {
+    const tasks = await api.listTasks({ project_id: projectId })
+    const stats = {}
+    for (const t of tasks) {
+      if (!t.episode) continue
+      if (!stats[t.episode]) stats[t.episode] = { total: 0, success: 0 }
+      stats[t.episode].total++
+      if (t.status === 'success') stats[t.episode].success++
+    }
+    episodeStats.value = stats
+  } catch (e) {
+    episodeStats.value = {}
+  }
+}
+
+const LS_KEY = computed(() => `jm-submit-state-${props.projectId || 'global'}`)
+
+function saveFormState() {
+  const state = {
+    duration: form.value.duration,
+    ratio: form.value.ratio,
+    model_version: form.value.model_version,
+    episode: form.value.episode,
+  }
+  try { localStorage.setItem(LS_KEY.value, JSON.stringify(state)) } catch (e) {}
+}
+
+function restoreFormState() {
+  try {
+    const raw = localStorage.getItem(LS_KEY.value)
+    if (!raw) return
+    const state = JSON.parse(raw)
+    if (state.duration) form.value.duration = state.duration
+    if (state.ratio) form.value.ratio = state.ratio
+    if (state.model_version) form.value.model_version = state.model_version
+    if (state.episode) form.value.episode = state.episode
+  } catch (e) {}
+}
+
 watch(() => props.projectId, async (val) => {
   form.value.project_id = val
   if (val) {
@@ -219,10 +323,32 @@ watch(() => props.projectId, async (val) => {
     } catch (e) {
       projectMaterials.value = []
     }
+    try {
+      const proj = await api.getProject(val)
+      projectEpisodeCount.value = proj.episode_count || 0
+    } catch (e) {
+      projectEpisodeCount.value = 0
+    }
+    await Promise.all([loadEpisodeStats(val), loadUsableAccounts()])
+    restoreFormState()
+    // 若无保存的集数，默认选第 1 集
+    if (!form.value.episode) form.value.episode = 1
   } else {
     projectMaterials.value = []
+    projectEpisodeCount.value = 0
+    usableAccounts.value = []
+    selectedAccountId.value = ''
+    episodeStats.value = {}
+    restoreFormState()
   }
 }, { immediate: true })
+
+// 自动保存表单状态
+watch(
+  () => [form.value.duration, form.value.ratio, form.value.model_version, form.value.episode],
+  () => saveFormState(),
+  { deep: true }
+)
 
 const hasFiles = computed(() => {
   return form.value.images.length || form.value.audios.length || form.value.videos.length
@@ -472,14 +598,24 @@ async function submit() {
     return
   }
 
+  if (form.value.project_id && !form.value.label.trim()) {
+    ElMessage.error('项目任务必须填写标签')
+    return
+  }
+  if (form.value.project_id && !form.value.episode) {
+    ElMessage.error('项目任务必须选择集数')
+    return
+  }
+
   const fd = new FormData()
-  fd.append('account_id', accountId.value)
+  fd.append('account_id', effectiveAccountId.value)
   fd.append('prompt', getPromptText())
   fd.append('duration', form.value.duration)
   fd.append('ratio', form.value.ratio)
   fd.append('model_version', form.value.model_version)
   if (form.value.project_id) fd.append('project_id', form.value.project_id)
   if (form.value.label) fd.append('label', form.value.label)
+  if (form.value.episode) fd.append('episode', form.value.episode)
 
   form.value.images.forEach(f => fd.append('images', f.raw))
   form.value.audios.forEach(f => fd.append('audios', f.raw))
@@ -495,7 +631,11 @@ async function submit() {
     form.value.videos = []
     materialMap.value = {}
     if (promptEditor.value) promptEditor.value.innerHTML = ''
-    form.value.label = ''
+    // 不重置 label 和 episode，方便连续提交
+    if (props.projectId) {
+      loadEpisodeStats(props.projectId)
+      loadUsableAccounts()
+    }
     emit('submitted')
   } catch (e) {
     ElMessage.error('提交失败: ' + e.message)
@@ -609,6 +749,33 @@ onMounted(() => {
   padding: 20px;
 }
 
+.account-row {
+  margin-bottom: 16px;
+}
+
+.account-select-item {
+  margin-bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.account-status {
+  font-size: 13px;
+  color: #606266;
+}
+
+.queue-info {
+  color: #909399;
+  font-size: 12px;
+}
+
+.account-credit {
+  color: #67c23a;
+  font-size: 12px;
+  margin-left: 4px;
+}
+
 .project-row {
   display: flex;
   gap: 16px;
@@ -617,6 +784,11 @@ onMounted(() => {
 
 .project-select-item, .label-input-item {
   flex: 1;
+  margin-bottom: 0;
+}
+
+.episode-input-item {
+  flex: 0 0 auto;
   margin-bottom: 0;
 }
 
