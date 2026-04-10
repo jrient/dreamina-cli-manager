@@ -14,7 +14,6 @@ services:
       - ACCOUNTS_DIR=/app/accounts
       - CONFIG_BASE=/app/configs
       - DB_PATH=/app/db/tasks.db
-      - UPLOAD_DIR=/tmp/uploads
       - RESULTS_DIR=/app/results
       - POLL_INTERVAL=60
     volumes:
@@ -36,8 +35,7 @@ services:
     depends_on:
       - backend
     volumes:
-      - ./frontend/src:/app/src       # 源码挂载
-      - ./frontend/public:/app/public # 静态资源挂载
+      - ./frontend/dist:/usr/share/nginx/html  # dist 挂载，npm run build 后直接生效，无需重建镜像
     networks:
       - dreamina-net
     restart: unless-stopped
