@@ -33,7 +33,7 @@
             type="primary"
             size="large"
             :loading="loading"
-            @click="handleLogin"
+            native-type="submit"
             class="login-btn"
           >
             登 录

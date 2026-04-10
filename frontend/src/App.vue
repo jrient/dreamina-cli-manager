@@ -5,9 +5,6 @@
       <div class="header-left">
         <span class="app-title">🎬 Dreamina 视频生成</span>
       </div>
-      <div class="header-center">
-        <AccountSelector v-if="authStore.isLoggedIn" />
-      </div>
       <div class="header-right">
         <template v-if="authStore.isLoggedIn">
           <el-button text @click="$router.push('/projects')">项目</el-button>
@@ -37,12 +34,12 @@
 import { ref, provide, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowDown } from '@element-plus/icons-vue'
-import AccountSelector from './components/AccountSelector.vue'
 import { useAuthStore } from './stores/auth'
 
 const router = useRouter()
 const authStore = useAuthStore()
 
+// 保留 provide 以便非项目页面使用（如 Admin）
 const selectedAccountId = ref('')
 provide('selectedAccountId', selectedAccountId)
 
@@ -50,9 +47,9 @@ onMounted(async () => {
   await authStore.fetchUser()
 })
 
-const handleCommand = (command) => {
+const handleCommand = async (command) => {
   if (command === 'logout') {
-    authStore.logout()
+    await authStore.logout()
     router.push('/login')
   }
 }

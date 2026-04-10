@@ -3,6 +3,8 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import axios from 'axios'
 
+axios.defaults.withCredentials = true
+
 export const useAuthStore = defineStore('auth', () => {
   const user = ref(null)
   const loading = ref(false)

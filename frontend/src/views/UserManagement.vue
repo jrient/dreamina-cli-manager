@@ -21,7 +21,7 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="240">
+        <el-table-column label="操作" width="320">
           <template #default="{ row }">
             <el-button size="small" @click="showResetPassword(row)">重置密码</el-button>
             <el-button

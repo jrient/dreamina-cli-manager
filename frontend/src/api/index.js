@@ -16,6 +16,7 @@ async function request(method, path, { body, params, timeout = DEFAULT_TIMEOUT }
     const resp = await fetch(url, {
       method,
       body,
+      credentials: 'include',
       signal: controller.signal,
       // Don't set Content-Type for FormData (browser sets it with boundary)
       ...(body instanceof FormData ? {} : { headers: { 'Content-Type': 'application/json' } }),
@@ -56,6 +57,7 @@ export const api = {
   deleteProject: (id, permanent = false) => request('DELETE', `/projects/${id}`, { params: { permanent } }),
   restoreProject: (id) => request('POST', `/projects/${id}/restore`),
   getProjectStats: (id) => request('GET', `/projects/${id}/stats`),
+  getUsableAccounts: (projectId) => request('GET', `/projects/${projectId}/usable-accounts`),
 
   // Materials
   listMaterials: (projectId, type = null) => request('GET', `/projects/${projectId}/materials`, { params: { type } }),
