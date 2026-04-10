@@ -7,45 +7,36 @@
         <el-icon><Plus /></el-icon>
         创建项目
       </el-button>
-      <el-button @click="$router.push('/admin')">
-        <el-icon><Setting /></el-icon>
-        Admin
-      </el-button>
     </div>
 
     <div class="project-grid" v-if="projects.length">
-      <el-card v-for="project in projects" :key="project.id" class="project-card" shadow="hover">
+      <el-card
+        v-for="project in projects"
+        :key="project.id"
+        class="project-card"
+        shadow="hover"
+        @click="$router.push(`/projects/${project.id}/tasks`)"
+      >
         <div class="card-header">
           <span class="project-name">{{ project.name }}</span>
-          <el-dropdown trigger="click">
-            <el-button text>
-              <el-icon><MoreFilled /></el-icon>
-            </el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item @click="showEditDialog(project)">编辑名称</el-dropdown-item>
-                <el-dropdown-item @click="confirmDelete(project)">删除项目</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+          <el-button
+            v-if="project.my_role === 'owner' || isAdmin"
+            text
+            type="danger"
+            size="small"
+            @click.stop="confirmDelete(project)"
+          >
+            <el-icon><Delete /></el-icon>
+          </el-button>
         </div>
         <div class="card-stats">
           <el-statistic title="任务数" :value="stats[project.id]?.task_count || 0" />
           <el-statistic title="素材数" :value="stats[project.id]?.material_count || 0" />
         </div>
         <div class="card-info">
-          <p>创建: {{ formatDate(project.created_at) }}</p>
+          <p v-if="project.creator_name">拥有者: {{ project.creator_name }}</p>
+          <p v-if="project.episode_count">集数: {{ project.episode_count }}</p>
           <p>更新: {{ formatDate(project.updated_at) }}</p>
-        </div>
-        <div class="card-actions">
-          <el-button type="primary" text @click="$router.push(`/projects/${project.id}/tasks`)">
-            <el-icon><List /></el-icon>
-            任务
-          </el-button>
-          <el-button type="primary" text @click="$router.push(`/projects/${project.id}/materials`)">
-            <el-icon><FolderOpened /></el-icon>
-            素材
-          </el-button>
         </div>
       </el-card>
     </div>
@@ -64,34 +55,23 @@
         <el-button type="primary" @click="createProject">创建</el-button>
       </template>
     </el-dialog>
-
-    <!-- 编辑项目对话框 -->
-    <el-dialog v-model="editDialogVisible" title="编辑项目" width="400px">
-      <el-form :model="editForm" label-width="80px">
-        <el-form-item label="项目名称">
-          <el-input v-model="editForm.name" placeholder="请输入项目名称" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="editDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="updateProject">保存</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Setting, MoreFilled, List, FolderOpened } from '@element-plus/icons-vue'
+import { Plus, Delete } from '@element-plus/icons-vue'
+import { useAuthStore } from '../stores/auth.js'
 import { api } from '../api/index.js'
+
+const authStore = useAuthStore()
+const isAdmin = authStore.isAdmin
 
 const projects = ref([])
 const stats = ref({})
 const createDialogVisible = ref(false)
-const editDialogVisible = ref(false)
 const createForm = ref({ name: '' })
-const editForm = ref({ id: '', name: '' })
 
 const formatDate = (dateStr) => {
   if (!dateStr) return ''
@@ -102,7 +82,6 @@ const formatDate = (dateStr) => {
 const loadProjects = async () => {
   try {
     projects.value = await api.listProjects()
-    // 加载每个项目的统计
     for (const project of projects.value) {
       stats.value[project.id] = await api.getProjectStats(project.id)
     }
@@ -111,7 +90,8 @@ const loadProjects = async () => {
   }
 }
 
-const showCreateDialog = () => {
+const showCreateDialog = (e) => {
+  e.stopPropagation()
   createForm.value.name = ''
   createDialogVisible.value = true
 }
@@ -128,27 +108,6 @@ const createProject = async () => {
     loadProjects()
   } catch (e) {
     ElMessage.error('创建失败: ' + e.message)
-  }
-}
-
-const showEditDialog = (project) => {
-  editForm.value.id = project.id
-  editForm.value.name = project.name
-  editDialogVisible.value = true
-}
-
-const updateProject = async () => {
-  if (!editForm.value.name.trim()) {
-    ElMessage.warning('请输入项目名称')
-    return
-  }
-  try {
-    await api.updateProject(editForm.value.id, editForm.value.name.trim())
-    ElMessage.success('项目更新成功')
-    editDialogVisible.value = false
-    loadProjects()
-  } catch (e) {
-    ElMessage.error('更新失败: ' + e.message)
   }
 }
 
@@ -191,11 +150,13 @@ onMounted(loadProjects)
 }
 .project-card {
   height: 100%;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.project-card:hover {
+  transform: translateY(-2px);
 }
 .card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
   margin-bottom: 16px;
 }
 .project-name {
@@ -210,13 +171,8 @@ onMounted(loadProjects)
 .card-info {
   color: #909399;
   font-size: 12px;
-  margin-bottom: 16px;
 }
 .card-info p {
   margin: 4px 0;
-}
-.card-actions {
-  display: flex;
-  gap: 12px;
 }
 </style>
