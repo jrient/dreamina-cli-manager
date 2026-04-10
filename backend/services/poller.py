@@ -168,6 +168,7 @@ async def dispatch_queued_tasks():
 
             # 检查该账号当前活跃任务数
             async with aiosqlite.connect(str(DB_PATH)) as db:
+                db.row_factory = aiosqlite.Row
                 cursor = await db.execute(
                     "SELECT COUNT(*) as cnt FROM tasks WHERE account_id=? AND status IN ('pending', 'processing', 'submitting')",
                     (account_id,)
