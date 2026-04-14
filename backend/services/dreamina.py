@@ -1,11 +1,34 @@
 # backend/services/dreamina.py
 import asyncio
 import json
+import logging
 import os
 import re
 import shutil
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+# 瞬时网络错误特征（Go CLI 错误字符串）
+TRANSIENT_ERROR_PATTERNS = (
+    "context deadline exceeded",
+    "connection reset by peer",
+    "connection refused",
+    "i/o timeout",
+    "no such host",
+    "EOF",
+    "TLS handshake timeout",
+    "server closed idle connection",
+    "unexpected EOF",
+)
+
+
+def _is_transient_error(msg: str) -> bool:
+    if not msg:
+        return False
+    lower = msg.lower()
+    return any(p.lower() in lower for p in TRANSIENT_ERROR_PATTERNS)
 
 # Dreamina 账号配置目录（每个账号独立的 HOME）
 ACCOUNT_HOME_BASE = Path("/root/.dreamina_accounts")
@@ -119,7 +142,7 @@ async def get_credit(account_id: str) -> str:
     return m.group(1) if m else stdout.strip()
 
 
-async def submit_multimodal2video(
+async def _submit_multimodal2video_once(
     account_id: str,
     image_paths: list[str],
     video_paths: list[str],
@@ -129,9 +152,7 @@ async def submit_multimodal2video(
     ratio: str,
     model_version: str,
 ) -> str:
-    """Submit a multimodal2video task. Returns submit_id."""
-    await ensure_account_initialized(account_id)
-
+    """单次提交，失败直接抛出。外层 submit_multimodal2video 负责瞬时错误重试。"""
     args = ["multimodal2video"]
     for p in image_paths:
         args += ["--image", p]
@@ -181,6 +202,50 @@ async def submit_multimodal2video(
         raise RuntimeError(f"Could not parse submit_id from output: {combined.strip()}")
 
     return m.group(1)
+
+
+SUBMIT_MAX_RETRIES = 3
+SUBMIT_RETRY_BACKOFF = (2, 5, 10)  # 秒
+
+
+async def submit_multimodal2video(
+    account_id: str,
+    image_paths: list[str],
+    video_paths: list[str],
+    audio_paths: list[str],
+    prompt: str,
+    duration: int,
+    ratio: str,
+    model_version: str,
+) -> str:
+    """Submit a multimodal2video task. 瞬时网络错误自动重试最多 3 次。Returns submit_id."""
+    await ensure_account_initialized(account_id)
+
+    last_exc: Optional[Exception] = None
+    for attempt in range(SUBMIT_MAX_RETRIES):
+        try:
+            return await _submit_multimodal2video_once(
+                account_id, image_paths, video_paths, audio_paths,
+                prompt, duration, ratio, model_version,
+            )
+        except ConcurrencyLimitError:
+            # 并发限制由上层处理（恢复 queued），不在此重试
+            raise
+        except RuntimeError as e:
+            msg = str(e)
+            if not _is_transient_error(msg) or attempt == SUBMIT_MAX_RETRIES - 1:
+                raise
+            last_exc = e
+            backoff = SUBMIT_RETRY_BACKOFF[min(attempt, len(SUBMIT_RETRY_BACKOFF) - 1)]
+            logger.warning(
+                f"submit_multimodal2video 瞬时错误，{backoff}s 后重试 "
+                f"({attempt + 1}/{SUBMIT_MAX_RETRIES}): {msg[:200]}"
+            )
+            await asyncio.sleep(backoff)
+
+    # 理论上到不了（要么 return 要么 raise）
+    assert last_exc is not None
+    raise last_exc
 
 
 async def query_result(account_id: str, submit_id: str) -> dict:
