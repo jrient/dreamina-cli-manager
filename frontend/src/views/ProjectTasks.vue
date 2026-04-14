@@ -71,10 +71,19 @@
                 → {{ formatDate(task.updated_at) }}
               </template>
             </span>
-            <el-button text type="primary" @click="copyTask(task)">
+            <el-button
+              v-if="task.status === 'failed'"
+              text
+              type="warning"
+              title="重试"
+              @click="retryTask(task)"
+            >
+              <el-icon><RefreshRight /></el-icon>
+            </el-button>
+            <el-button text type="primary" title="复制" @click="copyTask(task)">
               <el-icon><CopyDocument /></el-icon>
             </el-button>
-            <el-button type="danger" text @click="confirmDelete(task)">
+            <el-button type="danger" text title="删除" @click="confirmDelete(task)">
               <el-icon><Delete /></el-icon>
             </el-button>
           </div>
@@ -119,7 +128,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, CopyDocument, Delete, Download } from '@element-plus/icons-vue'
+import { Refresh, CopyDocument, Delete, Download, RefreshRight } from '@element-plus/icons-vue'
 import { api } from '../api/index.js'
 import SubmitTask from './SubmitTask.vue'
 
@@ -272,6 +281,22 @@ const confirmDelete = (task) => {
         ElMessage.error('删除失败: ' + e.message)
       }
     }).catch(() => {})
+}
+
+const retryTask = (task) => {
+  ElMessageBox.confirm(
+    `确定重试任务 ${task.id}？将重置为 queued 并重新提交。`,
+    '重试任务',
+    { type: 'warning' }
+  ).then(async () => {
+    try {
+      await api.retryTask(task.id)
+      ElMessage.success('任务已重新入队')
+      loadTasks()
+    } catch (e) {
+      ElMessage.error('重试失败: ' + e.message)
+    }
+  }).catch(() => {})
 }
 
 onMounted(() => {

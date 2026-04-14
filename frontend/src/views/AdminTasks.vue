@@ -54,15 +54,24 @@
           {{ formatDate(row.created_at) }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="200">
+      <el-table-column label="操作" width="220">
         <template #default="{ row }">
-          <el-button text type="primary" @click="copyTask(row)">
+          <el-button
+            v-if="row.status === 'failed'"
+            text
+            type="warning"
+            title="重试"
+            @click="retryTask(row)"
+          >
+            <el-icon><RefreshRight /></el-icon>
+          </el-button>
+          <el-button text type="primary" title="复制" @click="copyTask(row)">
             <el-icon><CopyDocument /></el-icon>
           </el-button>
-          <el-button text type="danger" @click="confirmDelete(row)">
+          <el-button text type="danger" title="删除" @click="confirmDelete(row)">
             <el-icon><Delete /></el-icon>
           </el-button>
-          <el-button v-if="row.result_url" text type="success" @click="openResult(row)">
+          <el-button v-if="row.result_url" text type="success" title="查看结果" @click="openResult(row)">
             <el-icon><VideoPlay /></el-icon>
           </el-button>
         </template>
@@ -74,7 +83,7 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, Refresh, CopyDocument, Delete, VideoPlay } from '@element-plus/icons-vue'
+import { ArrowLeft, Refresh, CopyDocument, Delete, VideoPlay, RefreshRight } from '@element-plus/icons-vue'
 import { api } from '../api/index.js'
 
 const tasks = ref([])
@@ -133,6 +142,22 @@ const copyTask = async (task) => {
   } catch (e) {
     ElMessage.error('复制失败: ' + e.message)
   }
+}
+
+const retryTask = (task) => {
+  ElMessageBox.confirm(
+    `确定重试任务 ${task.id}？将重置为 queued 状态并重新提交。`,
+    '重试任务',
+    { type: 'warning' }
+  ).then(async () => {
+    try {
+      await api.retryTask(task.id)
+      ElMessage.success('任务已重新入队')
+      loadTasks()
+    } catch (e) {
+      ElMessage.error('重试失败: ' + e.message)
+    }
+  }).catch(() => {})
 }
 
 const confirmDelete = (task) => {

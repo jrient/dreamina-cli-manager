@@ -55,7 +55,16 @@
             → {{ formatDate(task.updated_at) }}
           </template>
         </span>
-        <el-button type="danger" text @click="deleteTask(task.id)">
+        <el-button
+          v-if="task.status === 'failed'"
+          text
+          type="warning"
+          title="重试"
+          @click="retryTask(task)"
+        >
+          <el-icon><RefreshRight /></el-icon>
+        </el-button>
+        <el-button type="danger" text title="删除" @click="deleteTask(task.id)">
           <el-icon><Delete /></el-icon>
         </el-button>
       </div>
@@ -96,7 +105,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Delete, Download } from '@element-plus/icons-vue'
+import { Refresh, Delete, Download, RefreshRight } from '@element-plus/icons-vue'
 import { api } from '../api/index.js'
 
 const tasks = ref([])
@@ -177,6 +186,22 @@ async function deleteTask(id) {
   } catch (e) {
     ElMessage.error('删除失败: ' + e.message)
   }
+}
+
+function retryTask(task) {
+  ElMessageBox.confirm(
+    `确定重试任务 ${task.id}？将重置为 queued 并重新提交。`,
+    '重试任务',
+    { type: 'warning' }
+  ).then(async () => {
+    try {
+      await api.retryTask(task.id)
+      ElMessage.success('任务已重新入队')
+      fetchTasks()
+    } catch (e) {
+      ElMessage.error('重试失败: ' + e.message)
+    }
+  }).catch(() => {})
 }
 
 function statusType(s) {

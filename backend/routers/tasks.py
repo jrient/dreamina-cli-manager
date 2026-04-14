@@ -408,6 +408,33 @@ async def copy_task(task_id: str, session_id: str = Cookie(None)):
     return _row_to_task(row)
 
 
+@router.post("/{task_id}/retry", response_model=TaskResponse)
+async def retry_task(task_id: str, session_id: str = Cookie(None)):
+    """重试失败任务：保留原任务 ID 与素材，重置状态为 queued 等待 poller 再提交"""
+    await get_current_user_or_admin(session_id)
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM tasks WHERE id=?", (task_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(404, "任务不存在")
+        if row["status"] not in ("failed",):
+            raise HTTPException(400, f"仅允许重试 failed 任务（当前 {row['status']}）")
+
+        now = _now()
+        await db.execute(
+            "UPDATE tasks SET status='queued', submit_id=NULL, result_url=NULL, error_msg=NULL, updated_at=? WHERE id=?",
+            (now, task_id),
+        )
+        await db.commit()
+        cursor = await db.execute("SELECT * FROM tasks WHERE id=?", (task_id,))
+        row = await cursor.fetchone()
+
+    # 立即触发一次调度，避免等待 poller 周期
+    asyncio.create_task(dispatch_queued_tasks())
+    return _row_to_task(row)
+
+
 @router.get("/{task_id}/download")
 async def download_task(task_id: str, session_id: str = Cookie(None)):
     """代理下载任务视频，以标签作为文件名"""

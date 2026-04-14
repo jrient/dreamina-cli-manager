@@ -48,6 +48,7 @@ export const api = {
   getTask: (id) => request('GET', `/tasks/${id}`),
   deleteTask: (id) => request('DELETE', `/tasks/${id}`),
   copyTask: (id) => request('POST', `/tasks/${id}/copy`),
+  retryTask: (id) => request('POST', `/tasks/${id}/retry`),
 
   // Projects
   listProjects: (includeDeleted = false) => request('GET', '/projects', { params: { include_deleted: includeDeleted } }),
