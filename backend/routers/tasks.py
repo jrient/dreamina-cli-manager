@@ -427,14 +427,26 @@ async def download_task(task_id: str, session_id: str = Cookie(None)):
 
     import httpx
 
-    async def stream():
-        async with httpx.AsyncClient(timeout=60) as client:
-            async with client.stream("GET", row["result_url"]) as resp:
-                async for chunk in resp.aiter_bytes(8192):
-                    yield chunk
+    timeout = httpx.Timeout(connect=15.0, read=None, write=None, pool=None)
+    client = httpx.AsyncClient(timeout=timeout, follow_redirects=True)
+    req = client.build_request("GET", row["result_url"])
+    resp = await client.send(req, stream=True)
+    if resp.status_code != 200:
+        await resp.aclose()
+        await client.aclose()
+        raise HTTPException(502, f"源站下载失败: HTTP {resp.status_code}")
 
-    return StreamingResponse(
-        stream(),
-        media_type="video/mp4",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-    )
+    async def stream():
+        try:
+            async for chunk in resp.aiter_bytes(64 * 1024):
+                yield chunk
+        finally:
+            await resp.aclose()
+            await client.aclose()
+
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    content_length = resp.headers.get("content-length")
+    if content_length:
+        headers["Content-Length"] = content_length
+
+    return StreamingResponse(stream(), media_type="video/mp4", headers=headers)
