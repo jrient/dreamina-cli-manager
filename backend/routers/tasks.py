@@ -9,7 +9,7 @@ from typing import Optional
 
 import aiosqlite
 from fastapi import APIRouter, Cookie, File, Form, HTTPException, UploadFile, status
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from config import ACCOUNTS_DIR, UPLOAD_DIR, DB_PATH
 from models import TaskResponse
@@ -423,13 +423,28 @@ async def download_task(task_id: str, session_id: str = Cookie(None)):
 
     label = row["label"] or task_id
     episode = row["episode"]
-    filename = f"{episode}-{label}.mp4" if episode else f"{label}.mp4"
+    result_url = row["result_url"]
+    ext = Path(result_url.split("?", 1)[0]).suffix.lower() or ".mp4"
+    if ext not in {".mp4", ".mov", ".webm"}:
+        ext = ".mp4"
+    filename = f"{episode}-{label}{ext}" if episode else f"{label}{ext}"
+
+    # 本地已下载的文件直接用 FileResponse 返回
+    if result_url.startswith("/results/"):
+        local_path = Path("/app") / result_url.lstrip("/")
+        if not local_path.is_file():
+            raise HTTPException(404, "结果文件不存在")
+        return FileResponse(str(local_path), media_type="video/mp4", filename=filename)
+
+    # 远端 URL：代理流式下载
+    if not result_url.startswith(("http://", "https://")):
+        raise HTTPException(500, f"result_url 格式异常: {result_url[:64]}")
 
     import httpx
 
     timeout = httpx.Timeout(connect=15.0, read=None, write=None, pool=None)
     client = httpx.AsyncClient(timeout=timeout, follow_redirects=True)
-    req = client.build_request("GET", row["result_url"])
+    req = client.build_request("GET", result_url)
     resp = await client.send(req, stream=True)
     if resp.status_code != 200:
         await resp.aclose()
