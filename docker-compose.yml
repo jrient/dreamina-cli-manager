@@ -34,8 +34,6 @@ services:
       - "8090:80"
     depends_on:
       - backend
-    volumes:
-      - ./frontend/dist:/usr/share/nginx/html  # dist 挂载，npm run build 后直接生效，无需重建镜像
     networks:
       - dreamina-net
     restart: unless-stopped
